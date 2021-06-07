@@ -1,0 +1,8 @@
+2021-04-15 11:43:11.043423: F .\tensorflow/core/kernels/conv_2d_gpu.h:500] Non-OK-status: GpuLaunchKernel(ShuffleInTensor3Simple<T, 2, 1, 0>, config.block_count, config.thread_per_block, 0, d.stream(), config.virtual_thread_count, in.data(), combined_dims, out.data()) status: Internal: unspecified launch failure
+
+
+2021-04-22 00:35:28.090919: E tensorflow/stream_executor/stream.cc:5011] Internal: Failed to enqueue async memset operation: CUDA_ERROR_LAUNCH_FAILED: unspecified launch failure
+2021-04-22 00:35:28.091164: F .\tensorflow/core/kernels/reduction_gpu_kernels.cu.h:727] Non-OK-status: GpuLaunchKernel(RowReduceKernel<IN_T, OUT_T, Op>, num_blocks, threads_per_block, 0, cu_stream, in, out, num_rows, num_cols, op, init) status: Internal: unspecified launch failure
+
+
+2021-04-22 04:58:47.297836: F .\tensorflow/core/kernels/conv_2d_gpu.h:500] Non-OK-status: GpuLaunchKernel(ShuffleInTensor3Simple<T, 2, 1, 0>, config.block_count, config.thread_per_block, 0, d.stream(), config.virtual_thread_count, in.data(), combined_dims, out.data()) status: Internal: unspecified launch failure

@@ -53,3 +53,10 @@ class WeightedSum(Add):
         assert (len(inputs) == 2)
         output = ((1.0 - self.alpha) * inputs[0]) + (self.alpha * inputs[1])
         return output
+
+    def get_config(self):
+        config = {
+            'alpha': self.alpha
+        }
+        base_config = super(WeightedSum, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))

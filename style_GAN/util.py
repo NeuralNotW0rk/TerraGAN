@@ -2,7 +2,6 @@ from tensorflow.keras.models import model_from_json
 from PIL import Image
 
 import os
-import random
 import numpy as np
 
 

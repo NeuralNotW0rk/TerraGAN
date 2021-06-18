@@ -1,6 +1,5 @@
 import os
 import math
-import PIL.Image
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -10,8 +9,8 @@ dim = 1024
 max_elevation = 8000
 min_elevation = -100
 
-sample_size = 512
-samples_per_img = 32
+sample_size = 256
+samples_per_img = 64
 
 
 def process_section(name):
@@ -44,7 +43,7 @@ def process_section(name):
         # np.save('data/' + name + '/' + f[:-4] + '.npy', s)
     plt.imsave('data/region/' + name + '.png', data, vmin=-max_elevation, vmax=max_elevation, cmap='gray')
 
-def hgt_to_jpg(file, target):
+def hgt_to_jpg(file, target, data, image=True):
     d = int(math.sqrt(os.path.getsize(file) / 2))
     hgt = np.fromfile(file, np.dtype('>i2'), d * d).reshape((d, d))
     region = str(os.path.split(file)[0].split('/')[-1])
@@ -52,33 +51,33 @@ def hgt_to_jpg(file, target):
         pos = np.random.randint(0, d - sample_size, 2)
         sample = hgt[pos[0]:pos[0] + sample_size, pos[1]:pos[1] + sample_size]
         sample = np.rot90(sample, k=np.random.randint(0, 4), axes=[0, 1])
-        plt.imsave(os.path.join(target, region + '_' + os.path.basename(file))[:-4] + '_' + str(s) + '.jpg', sample,
-                   cmap='gray')
+        sample -= np.amin(sample)
+        sample = sample / np.amax(sample)
+        data.append(sample)
+        if image:
+            plt.imsave(os.path.join(target, region + '_' + os.path.basename(file))[:-4] + '_' + str(s) + '.jpg', sample,
+                       cmap='gray')
 
 
-def process_all(root, target, depth=0):
+def process_all(root, target, data, image, depth=0):
     if not os.path.exists(target):
         os.mkdir(target)
     print('  ' * depth + '-Processing ' + root)
     for p in os.listdir(root):
         path = os.path.join(root, p)
         if os.path.isdir(path):
-            process_all(path, target, depth + 1)
+            process_all(path, target, data, image, depth + 1)
         elif path[-3:] == 'hgt':
             print('  ' * (depth + 1) + '-Sampling ' + p)
-            hgt_to_jpg(path, target)
+            hgt_to_jpg(path, target, data, image=image)
 
 
 raw_dir = 'raw_data/vfp/'
-img_dir = 'data/vfp_512_2/'
-h5_path = '../tileGAN/datasets/vfp.h5'
+img_dir = 'data/vfp_256/'
+data_archive = 'data/vfp_256.npz'
 
-process_all(raw_dir, img_dir)
-
-'''
-n_img = len(os.listdir(img_dir))
-imgs = np.asarray([np.asarray(PIL.Image.open(os.path.join(img_dir, f))) for f in os.listdir(img_dir)])
-exp = HDF5Exporter(h5_filename=h5_path, resolution=dim, channels=3)
-exp.add_images_channel_last(imgs)
-exp.close()
-'''
+data = []
+process_all(raw_dir, img_dir, data, True)
+data = np.asarray(data)
+print(data.shape)
+np.savez_compressed(data_archive, data)

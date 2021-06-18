@@ -1,0 +1,8 @@
+
+.idea/
+style_GAN/config/
+style_GAN/models/
+style_GAN/results/
+terrain_utils/data/
+terrain_utils/raw_data/
+*.pyc

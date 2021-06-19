@@ -56,7 +56,7 @@ class WeightedSum(Add):
 
     def get_config(self):
         config = {
-            'alpha': self.alpha
+            'alpha': self.alpha.numpy()
         }
         base_config = super(WeightedSum, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))

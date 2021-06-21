@@ -1,5 +1,10 @@
 
 .idea/
+progressive_GAN/data/
+progressive_GAN/config/
+progressive_GAN/models/
+progressive_GAN/results/
+style_GAN/data/
 style_GAN/config/
 style_GAN/models/
 style_GAN/results/

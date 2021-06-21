@@ -61,13 +61,14 @@ class TrainingSession(object):
                  latent_size=100,
                  n_fmap=256,
                  n_blocks=6,
+                 input_shape=(4, 4, 3),
                  block_batch_sizes=(),
                  block_steps=(),
                  data_path='data/vfp_256.npz'):
 
         self.session_id = session_id
 
-        self.config_path = os.path.join('config', self.session_id + '.json')
+        self.config_path = 'config/' + self.session_id + '.json'
 
         # Session config already exists
         if os.path.exists(self.config_path):
@@ -81,6 +82,7 @@ class TrainingSession(object):
                            'latent_size': latent_size,
                            'n_fmap': n_fmap,
                            'n_blocks': n_blocks,
+                           'input_shape': input_shape,
                            'block_batch_sizes': list(block_batch_sizes),
                            'block_steps': list(block_steps),
                            'data_path': data_path}
@@ -100,10 +102,12 @@ class TrainingSession(object):
         if self.block == 0 and self.steps == 0:
             self.gen_models = self.gan.build_gen()
             self.dis_models = self.gan.build_dis()
-            self.comp_models = self.gan.build_composite()
+            self.save()
         else:
-            # TODO: load models
-            pass
+            self.gen_models = load_model_list('gen', self.gan.n_blocks, self.block, self.steps, self.session_id)
+            self.dis_models = load_model_list('dis', self.gan.n_blocks, self.block, self.steps, self.session_id)
+
+        self.comp_models = build_composite(self.dis_models, self.gen_models)
 
         self.dataset = load_real_samples(data_path)
         self.scaled_dataset = None
@@ -123,6 +127,7 @@ class TrainingSession(object):
         self.block += 1
         self.model_version = 1
         self.scale_dataset()
+        self.steps = 0
 
     def train(self):
 
@@ -145,8 +150,8 @@ class TrainingSession(object):
             update_fadein([g_model, d_model, comp_model], self.steps, self.block_steps[self.block])
 
         # Prepare samples
-        X_real, y_real = generate_real_samples(self.scaled_dataset, batch_size / 2)
-        X_fake, y_fake = generate_fake_samples(g_model, self.gan.latent_size, batch_size / 2)
+        X_real, y_real = generate_real_samples(self.scaled_dataset, int(batch_size / 2))
+        X_fake, y_fake = generate_fake_samples(g_model, self.gan.latent_size, int(batch_size / 2))
 
         # Train discriminator
         d_loss1 = d_model.train_on_batch(X_real, y_real)
@@ -158,7 +163,9 @@ class TrainingSession(object):
         g_loss = comp_model.train_on_batch(z_input, y_real2)
 
         if self.steps % 100 == 0:
-            print('\nStep ' + str(self.steps) + ':')
+            print('\nBlock ' + str(self.block)
+                  + ', version ' + str(self.model_version)
+                  + ', step ' + str(self.steps) + ':')
             print('D_real:', d_loss1)
             print('D_fake:', d_loss2)
             print('G:', g_loss)
@@ -167,15 +174,35 @@ class TrainingSession(object):
             self.save()
 
         if self.steps % 1000 == 0:
-            self.evaluate()
+            self.evaluate(g_model)
+
+        self.steps += 1
 
     def save(self):
-        # TODO: implement
-        pass
+        save_model_list(self.gen_models, 'gen', self.gan.n_blocks, self.block, self.steps, self.session_id)
+        save_model_list(self.dis_models, 'dis', self.gan.n_blocks, self.block, self.steps, self.session_id)
 
-    def evaluate(self):
-        # TODO: implement
-        pass
+        self.config['block'] = self.block
+        self.config['steps'] = self.steps
+        self.config['model_version'] = self.model_version
+        with open(self.config_path, 'w') as config_file:
+            config_file.write(json.dumps(self.config, indent=4))
+
+        print('--Models saved')
+
+    def evaluate(self, model):
+        z = generate_latent_points(self.gan.latent_size, 64)
+        imgs = model.predict(z)
+        r = []
+
+        for i in range(0, 64, 8):
+            r.append(np.concatenate(imgs[i:i + 8], axis=1))
+
+        c1 = np.concatenate(r, axis=0)
+        c1 = np.clip(c1, 0.0, 1.0)
+
+        save_image(c1, 'i_' + str(self.model_version), self.block, self.steps, self.session_id)
+        print('--Images saved')
 
     def is_complete(self):
 
@@ -184,25 +211,15 @@ class TrainingSession(object):
                and self.steps > self.block_steps[self.block]
 
 
-'''
 if __name__ == '__main__':
 
-    n_blocks = 6  # (2^2..2^(n+1))
-    latent_dim = 100
+    ts = TrainingSession(session_id='pro_test',
+                         latent_size=100,
+                         n_fmap=128,
+                         n_blocks=6,
+                         block_batch_sizes=[16, 16, 16, 16, 16, 16],
+                         block_steps=[10000, 10000, 10000, 10000, 10000, 10000],
+                         data_path='data/vfp_256.npz')
 
-    # Build individual models
-    d_models = define_discriminator(n_blocks)
-    g_models = define_generator(latent_dim, n_blocks)
-
-    # Composite models
-    gan_models = define_composite(d_models, g_models)
-
-    # Load data
-    dataset = load_real_samples('data/vfp_256.npz')
-    print('Loaded', dataset.shape)
-
-    # Train
-    n_batch = [16, 16, 16, 8, 4, 4]
-    n_epochs = [5, 8, 8, 10, 10, 10]
-    train(g_models, d_models, gan_models, dataset, latent_dim, n_epochs, n_epochs, n_batch)
-'''
+    while not ts.is_complete():
+        ts.train()

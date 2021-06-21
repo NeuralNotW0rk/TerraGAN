@@ -9,7 +9,7 @@ from tensorflow.keras.constraints import max_norm
 from tensorflow.keras.initializers import RandomNormal
 
 from layer import *
-
+from util import *
 
 def layer_name(block_idx, layer_type, layer_idx):
     return 'block' + str(block_idx) + '_' + layer_type + str(layer_idx)
@@ -42,14 +42,14 @@ class ProgressiveGAN(object):
 
         # Base model
         in_image = Input(shape=self.input_shape, name=layer_name(0, 'input', 0))
-        d = Conv2D(128, (1, 1), padding='same', kernel_initializer=init, kernel_constraint=const,
+        d = Conv2D(self.n_fmap, (1, 1), padding='same', kernel_initializer=init, kernel_constraint=const,
                    name=layer_name(0, 'conv', 0))(in_image)
         d = LeakyReLU(alpha=0.2, name=layer_name(0, 'lrelu', 0))(d)
         d = MinibatchStdev()(d)
-        d = Conv2D(128, (3, 3), padding='same', kernel_initializer=init, kernel_constraint=const,
+        d = Conv2D(self.n_fmap, (3, 3), padding='same', kernel_initializer=init, kernel_constraint=const,
                    name=layer_name(0, 'conv', 1))(d)
         d = LeakyReLU(alpha=0.2, name=layer_name(0, 'lrelu', 1))(d)
-        d = Conv2D(128, (4, 4), padding='same', kernel_initializer=init, kernel_constraint=const,
+        d = Conv2D(self.n_fmap, (4, 4), padding='same', kernel_initializer=init, kernel_constraint=const,
                    name=layer_name(0, 'conv', 2))(d)
         d = LeakyReLU(alpha=0.2, name=layer_name(0, 'lrelu', 2))(d)
         d = Flatten()(d)
@@ -59,23 +59,24 @@ class ProgressiveGAN(object):
         model_list.append([model, model])
 
         def block(block_idx, old_model, n_input_layers=3):
+
             # Initialize params
             init = RandomNormal(stddev=0.02)
             const = max_norm(1.0)
             in_shape = list(old_model.input.shape)
-            input_shape = (in_shape[-2].value * 2, in_shape[-2].value * 2, in_shape[-1].value)
+            input_shape = (in_shape[-2] * 2, in_shape[-2] * 2, in_shape[-1])
 
             # New input layer
             in_image = Input(shape=input_shape, name=layer_name(block_idx, 'input', 0))
-            d = Conv2D(128, (1, 1), padding='same', kernel_initializer=init, kernel_constraint=const,
+            d = Conv2D(self.n_fmap, (1, 1), padding='same', kernel_initializer=init, kernel_constraint=const,
                        name=layer_name(block_idx, 'conv', 0))(in_image)
             d = LeakyReLU(alpha=0.2, name=layer_name(block_idx, 'lrelu', 0))(d)
 
             # New block
-            d = Conv2D(128, (3, 3), padding='same', kernel_initializer=init, kernel_constraint=const,
+            d = Conv2D(self.n_fmap, (3, 3), padding='same', kernel_initializer=init, kernel_constraint=const,
                        name=layer_name(block_idx, 'conv', 1))(d)
             d = LeakyReLU(alpha=0.2, name=layer_name(block_idx, 'lrelu', 1))(d)
-            d = Conv2D(128, (3, 3), padding='same', kernel_initializer=init, kernel_constraint=const,
+            d = Conv2D(self.n_fmap, (3, 3), padding='same', kernel_initializer=init, kernel_constraint=const,
                        name=layer_name(block_idx, 'conv', 2))(d)
             d = LeakyReLU(alpha=0.2, name=layer_name(block_idx, 'lrelu', 2))(d)
             d = AveragePooling2D()(d)
@@ -111,6 +112,7 @@ class ProgressiveGAN(object):
         return model_list
 
     def build_gen(self):
+
         # Initialize parameters
         init = RandomNormal(stddev=0.02)
         const = max_norm(1.0)
@@ -120,14 +122,14 @@ class ProgressiveGAN(object):
 
         # Base model
         in_latent = Input(shape=(self.latent_size,), name=layer_name(0, 'input', 0))
-        g = Dense(128 * in_dim * in_dim, kernel_initializer=init, kernel_constraint=const,
+        g = Dense(self.n_fmap * in_dim * in_dim, kernel_initializer=init, kernel_constraint=const,
                   name=layer_name(0, 'dense', 0))(in_latent)
         g = Reshape((in_dim, in_dim, 128))(g)
-        g = Conv2D(128, (3, 3), padding='same', kernel_initializer=init, kernel_constraint=const,
+        g = Conv2D(self.n_fmap, (3, 3), padding='same', kernel_initializer=init, kernel_constraint=const,
                    name=layer_name(0, 'conv', 0))(g)
         g = PixelNormalization()(g)
         g = LeakyReLU(alpha=0.2, name=layer_name(0, 'lrelu', 0))(g)
-        g = Conv2D(128, (3, 3), padding='same', kernel_initializer=init, kernel_constraint=const,
+        g = Conv2D(self.n_fmap, (3, 3), padding='same', kernel_initializer=init, kernel_constraint=const,
                    name=layer_name(0, 'conv', 1))(g)
         g = PixelNormalization()(g)
         g = LeakyReLU(alpha=0.2, name=layer_name(0, 'irelu', 1))(g)
@@ -137,6 +139,7 @@ class ProgressiveGAN(object):
         model_list.append([model, model])
 
         def block(block_idx, old_model):
+
             # Initialize params
             init = RandomNormal(stddev=0.02)
             const = max_norm(1.0)
@@ -144,11 +147,11 @@ class ProgressiveGAN(object):
             # Add new block to end of old model
             block_end = old_model.layers[-2].output
             upsampling = UpSampling2D()(block_end)
-            g = Conv2D(128, (3, 3), padding='same', kernel_initializer=init, kernel_constraint=const,
+            g = Conv2D(self.n_fmap, (3, 3), padding='same', kernel_initializer=init, kernel_constraint=const,
                        name=layer_name(block_idx, 'conv', 0))(upsampling)
             g = PixelNormalization()(g)
             g = LeakyReLU(alpha=0.2, name=layer_name(block_idx, 'lrelu', 0))(g)
-            g = Conv2D(128, (3, 3), padding='same', kernel_initializer=init, kernel_constraint=const,
+            g = Conv2D(self.n_fmap, (3, 3), padding='same', kernel_initializer=init, kernel_constraint=const,
                        name=layer_name(block_idx, 'conv', 1))(g)
             g = PixelNormalization()(g)
             g = LeakyReLU(alpha=0.2, name=layer_name(block_idx, 'lrelu', 1))(g)
@@ -172,30 +175,29 @@ class ProgressiveGAN(object):
 
         return model_list
 
-    def build_composite(self):
-        discriminators = self.build_dis()
-        generators = self.build_gen()
 
-        model_list = list()
+def build_composite( discriminators, generators):
 
-        # Build composite models
-        for i in range(len(discriminators)):
-            g_models, d_models = generators[i], discriminators[i]
+    model_list = list()
 
-            # Straight-through model
-            d_models[0].trainable = False
-            model1 = Sequential()
-            model1.add(g_models[0])
-            model1.add(d_models[0])
-            model1.compile(loss=wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
+    # Build composite models
+    for i in range(len(discriminators)):
+        g_models, d_models = generators[i], discriminators[i]
 
-            # Stage transition model
-            d_models[1].trainable = False
-            model2 = Sequential()
-            model2.add(g_models[1])
-            model2.add(d_models[1])
-            model2.compile(loss=wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
+        # Straight-through model
+        d_models[0].trainable = False
+        model1 = Sequential()
+        model1.add(g_models[0])
+        model1.add(d_models[0])
+        model1.compile(loss=wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
 
-            model_list.append([model1, model2])
+        # Stage transition model
+        d_models[1].trainable = False
+        model2 = Sequential()
+        model2.add(g_models[1])
+        model2.add(d_models[1])
+        model2.compile(loss=wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
 
-        return model_list
+        model_list.append([model1, model2])
+
+    return model_list

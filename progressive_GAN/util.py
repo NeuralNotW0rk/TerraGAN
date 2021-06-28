@@ -6,9 +6,11 @@ from tensorflow.keras.models import model_from_json
 
 from layer import *
 
+root_dir = ''
+
 
 def save_model(model, name, block, num, session):
-    path = 'models/' + session + '/'
+    path = root_dir + 'models/' + session + '/'
     if not os.path.exists(path):
         os.mkdir(path)
     path += 'block_' + str(block) + '/'
@@ -29,7 +31,7 @@ def save_model_list(model_list, name, n_blocks, block, num, session):
 
 
 def load_model(name, block, num, session):
-    path = 'models/' + session + '/block_' + str(block) + '/'
+    path = root_dir + 'models/' + session + '/block_' + str(block) + '/'
     file = open(path + name + ".json", 'r')
     json = file.read()
     file.close()
@@ -51,7 +53,7 @@ def load_model_list(name, n_blocks, block, num, session):
 
 
 def save_image(data, name, block, num, session):
-    path = 'results/' + session + '/'
+    path = root_dir + 'results/' + session + '/'
     if not os.path.exists(path):
         os.mkdir(path)
     path += 'block_' + str(block) + '/'

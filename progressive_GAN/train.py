@@ -1,52 +1,91 @@
-import numpy as np
-import matplotlib.pyplot as plt
-import os
+from tensorflow.keras.optimizers import Adam
+
 import json
 
-from layer import *
 from model import *
 
-root_dir = ''
+LAMBDA = 10
+
+
+def random_latents(latent_size, n):
+    return np.random.normal(0.0, 1.0, size=[n, latent_size])
 
 
 def load_real_samples(filename):
-
     data = np.load(filename)
     X = data['arr_0']
     X = X.astype('float32')
-    X = (X - 127.5) / 127.5
+    X = (X - 0.5) * 2.0
 
     return X
 
 
-def generate_real_samples(dataset, n_samples):
+class TrainingSession(object):
 
-    ix = np.random.randint(0, dataset.shape[0], n_samples)
-    X = dataset[ix]
-    y = np.ones((n_samples, 1))
+    def __init__(self,
+                 session_id,
+                 n_blocks=6,
+                 latent_size=100,
+                 channels=3,
+                 init_res=4,
+                 n_fmap=None,
+                 block_batch_sizes=None,
+                 block_steps=None,
+                 data_path='data/vfp_256.npz'):
 
-    return X, y
+        self.session_id = session_id
 
+        self.config_path = root_dir + 'config/' + self.session_id + '.json'
 
-def generate_latent_points(latent_dim, n_samples):
+        # Session config already exists
+        if os.path.exists(self.config_path):
+            with open(self.config_path) as config_file:
+                self.config = json.load(config_file)
+        else:
+            sample_latents = []
+            for latent in list(random_latents(latent_size, 64)):
+                sample_latents.append(list(latent))
+            self.config = {'id': self.session_id,
+                           'block': 0,
+                           'steps': 0,
+                           'latent_size': latent_size,
+                           'n_fmap': n_fmap,
+                           'n_blocks': n_blocks,
+                           'block_batch_sizes': list(block_batch_sizes),
+                           'block_steps': list(block_steps),
+                           'data_path': data_path,
+                           'sample_latents': sample_latents}
 
-    x_input = np.random.randn(latent_dim * n_samples)
-    x_input = x_input.reshape(n_samples, latent_dim)
+        self.block = self.config['block']
+        self.steps = self.config['steps']
+        self.block_batch_sizes = self.config['block_batch_sizes']
+        self.block_steps = self.config['block_steps']
+        self.data_path = self.config['data_path']
+        self.sample_latents = np.asarray(self.config['sample_latents'])
 
-    return x_input
+        self.gan = ProgressiveGAN(latent_size=100,
+                                  channels=3,
+                                  n_blocks=self.block)
 
+        if self.block == 0 and self.steps == 0:
+            self.gen = self.gan.build_gen()
+            self.dis = self.gan.build_dis()
+            self.save()
+        else:
+            # TODO: Load models
+            pass
 
-def generate_fake_samples(generator, latent_dim, n_samples):
+        self.dis_models = self.gan.build_dis()
 
-    x_input = generate_latent_points(latent_dim, n_samples)
-    X = generator.predict(x_input)
-    y = -np.ones((n_samples, 1))
+        self.gen_opt = Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8)
+        self.dis_opt = Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8)
 
-    return X, y
+        self.dataset = load_real_samples(data_path)
+        self.scaled_dataset = None
+        self.scale_dataset()
 
 
 def update_fadein(models, step, n_steps):
-
     alpha = step / float(n_steps - 1)
     for model in models:
         for layer in model.layers:
@@ -54,7 +93,7 @@ def update_fadein(models, step, n_steps):
                 K.set_value(layer.alpha, alpha)
 
 
-class TrainingSession(object):
+class ArrayTrainingSession(object):
 
     def __init__(self,
                  session_id,
@@ -68,13 +107,16 @@ class TrainingSession(object):
 
         self.session_id = session_id
 
-        self.config_path = 'config/' + self.session_id + '.json'
+        self.config_path = root_dir + 'config/' + self.session_id + '.json'
 
         # Session config already exists
         if os.path.exists(self.config_path):
             with open(self.config_path) as config_file:
                 self.config = json.load(config_file)
         else:
+            sample_latents = []
+            for latent in list(random_latents(latent_size, 64)):
+                sample_latents.append(list(latent))
             self.config = {'id': self.session_id,
                            'block': 0,
                            'steps': 0,
@@ -85,7 +127,8 @@ class TrainingSession(object):
                            'input_shape': input_shape,
                            'block_batch_sizes': list(block_batch_sizes),
                            'block_steps': list(block_steps),
-                           'data_path': data_path}
+                           'data_path': data_path,
+                           'sample_latents': sample_latents}
 
         self.block = self.config['block']
         self.steps = self.config['steps']
@@ -93,8 +136,9 @@ class TrainingSession(object):
         self.block_batch_sizes = self.config['block_batch_sizes']
         self.block_steps = self.config['block_steps']
         self.data_path = self.config['data_path']
+        self.sample_latents = np.asarray(self.config['sample_latents'])
 
-        self.gan = ProgressiveGAN(latent_size=self.config['latent_size'],
+        self.gan = ProgressiveGANArray(latent_size=self.config['latent_size'],
                                   n_fmap=self.config['n_fmap'],
                                   n_blocks=self.config['n_blocks'],
                                   input_shape=self.config['input_shape'])
@@ -107,74 +151,111 @@ class TrainingSession(object):
             self.gen_models = load_model_list('gen', self.gan.n_blocks, self.block, self.steps, self.session_id)
             self.dis_models = load_model_list('dis', self.gan.n_blocks, self.block, self.steps, self.session_id)
 
-        self.comp_models = build_composite(self.dis_models, self.gen_models)
+        self.dis_models = self.gan.build_dis()
+
+        self.gen_opt = Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8)
+        self.dis_opt = Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8)
 
         self.dataset = load_real_samples(data_path)
         self.scaled_dataset = None
         self.scale_dataset()
 
+    def real_images(self, n_samples):
+
+        ix = np.random.randint(0, self.scaled_dataset.shape[0], n_samples)
+        X = self.scaled_dataset[ix]
+
+        return X
+
     def scale_dataset(self):
 
-        images_list = list()
         res = 2 ** (2 + self.block)
-        for image in self.dataset:
-            new_image = np.resize(image, [res, res, 3])
-            images_list.append(new_image)
-        self.scaled_dataset = np.asarray(images_list)
+        gray = tf.image.resize(self.dataset, [res, res])
+        self.scaled_dataset = tf.image.grayscale_to_rgb(gray).numpy()
 
-    def next_block(self):
+    # @tf.function
+    def train_step(self, images, latents, batch_size):
 
-        self.block += 1
-        self.model_version = 1
-        self.scale_dataset()
-        self.steps = 0
+        generator = self.gen_models[self.block][self.model_version]
+        discriminator = self.dis_models[self.block][self.model_version]
+
+        epsilon = tf.random.uniform(shape=[batch_size, 1, 1, 1], minval=0, maxval=1)
+
+        with tf.GradientTape(persistent=True) as d_tape:
+            with tf.GradientTape() as gp_tape:
+                fake_images = generator(latents, training=True)
+                fake_images_mixed = epsilon * images + ((1 - epsilon) * fake_images)
+                fake_mixed_pred = discriminator(fake_images_mixed, training=True)
+
+            # Compute gradient penalty
+            grads = gp_tape.gradient(fake_mixed_pred, fake_images_mixed)
+            grad_norms = tf.sqrt(tf.reduce_sum(tf.square(grads), axis=[1, 2, 3]))
+            gradient_penalty = tf.reduce_mean(tf.square(grad_norms - 1))
+
+            fake_pred = discriminator(fake_images, training=True)
+            real_pred = discriminator(images, training=True)
+
+            D_loss = tf.reduce_mean(fake_pred) - tf.reduce_mean(real_pred) + LAMBDA * gradient_penalty
+
+        # Calculate the gradients for discriminator
+        D_gradients = d_tape.gradient(D_loss, discriminator.trainable_variables)
+
+        # Apply the gradients to the optimizer
+        self.dis_opt.apply_gradients(zip(D_gradients, discriminator.trainable_variables))
+
+        with tf.GradientTape() as g_tape:
+            fake_images = generator(latents, training=True)
+            fake_pred = discriminator(fake_images, training=True)
+            G_loss = -tf.reduce_mean(fake_pred)
+
+        # Calculate the gradients for discriminator
+        G_gradients = g_tape.gradient(G_loss, generator.trainable_variables)
+
+        # Apply the gradients to the optimizer
+        self.gen_opt.apply_gradients(zip(G_gradients, generator.trainable_variables))
+
+        return D_loss, G_loss
 
     def train(self):
 
         if self.steps > self.block_steps[self.block]:
             if self.block == 0 or self.model_version == 0:
-                self.next_block()
+                self.block += 1
+                self.model_version = 1
+                self.scale_dataset()
+                self.steps = 0
             elif self.block == self.gan.n_blocks - 1:
                 pass
             else:
                 self.model_version = 0
-
-        g_model = self.gen_models[self.block][self.model_version]
-        d_model = self.dis_models[self.block][self.model_version]
-        comp_model = self.comp_models[self.block][self.model_version]
+                self.steps = 0
 
         batch_size = self.block_batch_sizes[self.block]
 
+        gen = self.gen_models[self.block][self.model_version]
+        dis = self.dis_models[self.block][self.model_version]
+
         # Update alpha if needed
         if self.model_version == 1:
-            update_fadein([g_model, d_model, comp_model], self.steps, self.block_steps[self.block])
+            update_fadein([gen, dis], self.steps, self.block_steps[self.block])
 
-        # Prepare samples
-        X_real, y_real = generate_real_samples(self.scaled_dataset, int(batch_size / 2))
-        X_fake, y_fake = generate_fake_samples(g_model, self.gan.latent_size, int(batch_size / 2))
+        images = self.real_images(batch_size)
+        latents = random_latents(self.gan.latent_size, batch_size)
 
-        # Train discriminator
-        d_loss1 = d_model.train_on_batch(X_real, y_real)
-        d_loss2 = d_model.train_on_batch(X_fake, y_fake)
-
-        # Train generator
-        z_input = generate_latent_points(self.gan.latent_size, batch_size)
-        y_real2 = np.ones((batch_size, 1))
-        g_loss = comp_model.train_on_batch(z_input, y_real2)
+        d_loss, g_loss = self.train_step(images, latents, batch_size)
 
         if self.steps % 100 == 0:
             print('\nBlock ' + str(self.block)
                   + ', version ' + str(self.model_version)
                   + ', step ' + str(self.steps) + ':')
-            print('D_real:', d_loss1)
-            print('D_fake:', d_loss2)
-            print('G:', g_loss)
+            print('D:', d_loss.numpy())
+            print('G:', g_loss.numpy())
 
-        if self.steps % 500 == 0:
+        if self.steps % 10000 == 0:
             self.save()
 
         if self.steps % 1000 == 0:
-            self.evaluate(g_model)
+            self.evaluate(gen)
 
         self.steps += 1
 
@@ -191,8 +272,8 @@ class TrainingSession(object):
         print('--Models saved')
 
     def evaluate(self, model):
-        z = generate_latent_points(self.gan.latent_size, 64)
-        imgs = model.predict(z)
+        imgs = model.predict(self.sample_latents)
+        imgs = (imgs + 1.0) / 2.0
         r = []
 
         for i in range(0, 64, 8):
@@ -213,13 +294,13 @@ class TrainingSession(object):
 
 if __name__ == '__main__':
 
-    ts = TrainingSession(session_id='pro_test',
-                         latent_size=100,
-                         n_fmap=128,
-                         n_blocks=6,
-                         block_batch_sizes=[16, 16, 16, 16, 16, 16],
-                         block_steps=[10000, 10000, 10000, 10000, 10000, 10000],
-                         data_path='data/vfp_256.npz')
+    ts = ArrayTrainingSession(session_id='pro_test',
+                              latent_size=100,
+                              n_fmap=128,
+                              n_blocks=6,
+                              block_batch_sizes=[16, 16, 16, 16, 16, 16],
+                              block_steps=[10000, 10000, 10000, 10000, 10000, 10000],
+                              data_path='data/vfp_256.npz')
 
     while not ts.is_complete():
         ts.train()

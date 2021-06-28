@@ -43,16 +43,18 @@ def process_section(name):
         # np.save('data/' + name + '/' + f[:-4] + '.npy', s)
     plt.imsave('data/region/' + name + '.png', data, vmin=-max_elevation, vmax=max_elevation, cmap='gray')
 
+
 def hgt_to_jpg(file, target, data, image=True):
     d = int(math.sqrt(os.path.getsize(file) / 2))
     hgt = np.fromfile(file, np.dtype('>i2'), d * d).reshape((d, d))
     region = str(os.path.split(file)[0].split('/')[-1])
     for s in range(samples_per_img):
         pos = np.random.randint(0, d - sample_size, 2)
-        sample = hgt[pos[0]:pos[0] + sample_size, pos[1]:pos[1] + sample_size]
+        sample = np.copy(hgt[pos[0]:pos[0] + sample_size, pos[1]:pos[1] + sample_size])
         sample = np.rot90(sample, k=np.random.randint(0, 4), axes=[0, 1])
         sample -= np.amin(sample)
         sample = sample / np.amax(sample)
+        sample = np.expand_dims(sample, axis=-1)
         data.append(sample)
         if image:
             plt.imsave(os.path.join(target, region + '_' + os.path.basename(file))[:-4] + '_' + str(s) + '.jpg', sample,
@@ -77,7 +79,7 @@ img_dir = 'data/vfp_256/'
 data_archive = 'data/vfp_256.npz'
 
 data = []
-process_all(raw_dir, img_dir, data, True)
+process_all(raw_dir, img_dir, data, False)
 data = np.asarray(data)
 print(data.shape)
 np.savez_compressed(data_archive, data)

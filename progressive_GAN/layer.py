@@ -162,22 +162,3 @@ class MinibatchStdev(Layer):
         input_shape = list(input_shape)
         input_shape[-1] += 1
         return tuple(input_shape)
-
-
-class WeightedSum(Add):
-
-    def __init__(self, alpha=0.0, **kwargs):
-        super(WeightedSum, self).__init__(**kwargs)
-        self.alpha = K.variable(alpha, name='ws_alpha')
-
-    def _merge_function(self, inputs):
-        assert (len(inputs) == 2)
-        output = ((1.0 - self.alpha) * inputs[0]) + (self.alpha * inputs[1])
-        return output
-
-    def get_config(self):
-        config = {
-            'alpha': self.alpha.numpy()
-        }
-        base_config = super(WeightedSum, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))

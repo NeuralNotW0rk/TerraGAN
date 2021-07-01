@@ -31,5 +31,5 @@ def save_image(data, name, block, num, session):
     path += 'block_' + str(block) + '/'
     if not os.path.exists(path):
         os.mkdir(path)
-    x = Image.fromarray(np.uint8(data * 255))
+    x = tf.keras.preprocessing.image.array_to_img(data)
     x.save(path + name + '_' + str(block) + '_' + str(num) + '.png')

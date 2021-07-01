@@ -66,21 +66,28 @@ class TrainingSession(object):
 
         self.gan = ProgressiveGAN(latent_size=100,
                                   channels=1,
-                                  n_blocks=self.block,
-                                  n_fmap=self.config['n_fmap'][:self.block])
+                                  n_blocks=self.block + 1,
+                                  n_fmap=self.config['n_fmap'][:self.block + 1])
 
         self.gen = self.gan.build_gen()
         self.dis = self.gan.build_dis()
 
-        if self.block > 0 or self.steps > 0:
+        if self.steps > 0:
+            print('Loading from save point...')
             load_weights(self.gen, 'gen', self.block, self.steps, self.session_id)
             load_weights(self.dis, 'dis', self.block, self.steps, self.session_id)
+        elif self.block > 0:
+            print('Loading previous version weights...')
+            load_weights(self.gen, 'gen', self.block - 1, self.block_steps[self.block - 1], self.session_id)
+            load_weights(self.dis, 'dis', self.block - 1, self.block_steps[self.block - 1], self.session_id)
+        else:
+            print('Building new model...')
 
         self.gen_opt = Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8)
         self.dis_opt = Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8)
 
         self.dataset = load_real_samples(data_path)
-        self.scaled_dataset = tf.image.resize(self.dataset, [self.gan.final_res, self.gan.final_res])
+        self.scaled_dataset = tf.image.resize(self.dataset, [self.gan.final_res, self.gan.final_res]).numpy()
 
     def real_images(self, n_samples):
 
@@ -89,24 +96,31 @@ class TrainingSession(object):
 
         return images
 
+    def get_alpha(self, n_samples):
+
+        alpha = min(2.0 * self.steps / self.block_steps[self.block], 1.0)
+        alpha_array = np.repeat(alpha, n_samples).reshape(n_samples, 1)
+
+        return alpha_array
+
     @tf.function
-    def compute_WGAN_GP(self, images, latents, batch_size):
+    def compute_WGAN_GP(self, images, latents, batch_size, alpha):
 
         epsilon = tf.random.uniform(shape=[batch_size, 1, 1, 1], minval=0, maxval=1)
 
         with tf.GradientTape(persistent=True) as dis_tape:
             with tf.GradientTape() as gp_tape:
-                fake_images = self.gen(latents, training=True)
+                fake_images = self.gen([latents, alpha], training=True)
                 fake_images_mixed = epsilon * images + ((1 - epsilon) * fake_images)
-                fake_mixed_pred = self.dis(fake_images_mixed, training=True)
+                fake_mixed_pred = self.dis([fake_images_mixed, alpha], training=True)
 
             # Compute gradient penalty
             grads = gp_tape.gradient(fake_mixed_pred, fake_images_mixed)
             grad_norms = tf.sqrt(tf.reduce_sum(tf.square(grads), axis=[1, 2, 3]))
             gradient_penalty = tf.reduce_mean(tf.square(grad_norms - 1))
 
-            fake_pred = self.dis(fake_images, training=True)
-            real_pred = self.dis(images, training=True)
+            fake_pred = self.dis([fake_images, alpha], training=True)
+            real_pred = self.dis([images, alpha], training=True)
 
             dis_loss = tf.reduce_mean(fake_pred) - tf.reduce_mean(real_pred) + LAMBDA * gradient_penalty
 
@@ -117,8 +131,8 @@ class TrainingSession(object):
         self.dis_opt.apply_gradients(zip(dis_gradients, self.dis.trainable_variables))
 
         with tf.GradientTape() as gen_tape:
-            fake_images = self.gen(latents, training=True)
-            fake_pred = self.dis(fake_images, training=True)
+            fake_images = self.gen([latents, alpha], training=True)
+            fake_pred = self.dis([fake_images, alpha], training=True)
             gen_loss = -tf.reduce_mean(fake_pred)
 
         # Calculate the gradients for discriminator
@@ -135,12 +149,14 @@ class TrainingSession(object):
 
         images = self.real_images(batch_size)
         latents = random_latents(self.gan.latent_size, batch_size)
+        alpha = self.get_alpha(batch_size)
 
-        d_loss, g_loss = self.compute_WGAN_GP(images, latents, batch_size)
+        d_loss, g_loss = self.compute_WGAN_GP(images, latents, batch_size, alpha)
 
         if self.steps % 100 == 0:
             print('\nBlock ' + str(self.block)
                   + ', step ' + str(self.steps) + ':')
+            print('Alpha:', alpha[0, 0])
             print('D:', d_loss.numpy())
             print('G:', g_loss.numpy())
 
@@ -156,13 +172,14 @@ class TrainingSession(object):
 
         print('Starting block ' + str(self.block) + ' at step ' + str(self.steps))
 
-        while self.steps <= self.block_steps(self.block):
+        while self.steps <= self.block_steps[self.block]:
             self.train_step()
 
         if self.block < self.n_blocks - 1:
             # Next block
             self.block += 1
             self.steps = 0
+            self.save()
             print('Block training complete. Restart to begin next block')
         else:
             # Model complete
@@ -180,7 +197,7 @@ class TrainingSession(object):
         print('--Weights saved')
 
     def evaluate(self, model):
-        imgs = model.predict(self.sample_latents)
+        imgs = model.predict([self.sample_latents, self.get_alpha(64)])
         imgs = (imgs + 1.0) / 2.0
         r = []
 
@@ -201,9 +218,9 @@ if __name__ == '__main__':
                          latent_size=100,
                          channels=1,
                          init_res=4,
-                         n_fmap=[512, 512, 512, 512, 512, 256, 128],
+                         n_fmap=[512, 512, 512, 512, 256, 128, 64],
                          block_batch_sizes=[16, 16, 16, 16, 8, 8, 4],
                          block_steps=[100000, 100000, 100000, 100000, 100000, 100000, 100000],
-                         data_path='data/vfp_256.npz')
+                         data_path=root_dir + 'data/vfp_256.npz')
 
     ts.train_block()

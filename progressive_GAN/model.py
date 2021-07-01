@@ -57,6 +57,8 @@ class ProgressiveGAN(object):
         # Input block
         in_latent = Input(shape=(self.latent_size,),
                           name='input_latent')
+        alpha = Input(shape=1, name='input_alpha')
+
         x = EqualizeLearningRate(Dense(self.n_fmap[0] * self.init_res * self.init_res,
                                        kernel_initializer=kernel_initializer),
                                  name='base_dense')(in_latent)
@@ -82,9 +84,9 @@ class ProgressiveGAN(object):
                                         kernel_size=1,
                                         padding=self.padding,
                                         kernel_initializer=kernel_initializer),
-                                 name='to_channels_{}'.format(self.n_blocks))(x)
+                                 name='to_channels_{}'.format(self.n_blocks - 1))(x)
 
-        if fade_in:
+        if fade_in and self.n_blocks > 1:
             # Get latest block output
             x1 = x
 
@@ -93,19 +95,16 @@ class ProgressiveGAN(object):
                                              kernel_size=1,
                                              padding=self.padding,
                                              kernel_initializer=kernel_initializer),
-                                      name='to_channels_{}_prev'.format(self.n_blocks))(up)
+                                      name='to_channels_{}'.format(self.n_blocks - 2))(up)
 
             # Combine using weighted sum
-            alpha = Input(shape=1, name='input_alpha')
             x1 = Multiply()([alpha, x1])
             x2 = Multiply()([1 - alpha, x2])
             x = Add()([x1, x2])
 
-            # Fade-in model
-            return Model(inputs=[in_latent, alpha], outputs=x, name='gen_fade')
+        model = Model(inputs=[in_latent, alpha], outputs=x, name='gen')
 
-        # Stable model
-        return Model(inputs=in_latent, outputs=x, name='gen')
+        return model
 
     def dis_block(self, x, block):
 
@@ -115,7 +114,7 @@ class ProgressiveGAN(object):
                                         kernel_initializer=kernel_initializer),
                                  name='block{}_conv1'.format(block))(x)
         x = LeakyReLU()(x)
-        x = EqualizeLearningRate(Conv2D(self.n_fmap[block],
+        x = EqualizeLearningRate(Conv2D(self.n_fmap[block - 1],
                                         kernel_size=self.kernel_size,
                                         padding=self.padding,
                                         kernel_initializer=kernel_initializer),
@@ -128,34 +127,42 @@ class ProgressiveGAN(object):
 
         # Input
         in_image = Input(shape=[self.final_res, self.final_res, self.channels], name='input_image')
-
-        # Get input for latest block
-        x1 = EqualizeLearningRate(Conv2D(self.n_fmap[self.n_blocks - 1],
-                                         kernel_size=1,
-                                         padding=self.padding,
-                                         kernel_initializer=kernel_initializer),
-                                  name='from_channels_{}'.format(self.n_blocks))(in_image)
-        x1 = self.dis_block(x1, self.n_blocks - 1)
-        x1 = AveragePooling2D()(x1)
-
-        # Get input for previous block
-        x2 = AveragePooling2D()(in_image)
-        x2 = EqualizeLearningRate(Conv2D(self.n_fmap[self.n_blocks - 2],
-                                         kernel_size=1,
-                                         padding=self.padding,
-                                         kernel_initializer=kernel_initializer),
-                                  name='from_channels_{}_prev'.format(self.n_blocks))(x2)
-
-        # Combine using weighted sum
         alpha = Input(shape=1, name='input_alpha')
-        x1 = Multiply()([alpha, x1])
-        x2 = Multiply()([1 - alpha, x2])
-        x = Add()([x1, x2])
 
-        # Remaining blocks
-        for i in range(self.n_blocks - 2, 0, -1):
-            x = self.dis_block(x, i)
-            x = AveragePooling2D()(x)
+        if self.n_blocks > 1:
+            # Get input for latest block
+            x1 = EqualizeLearningRate(Conv2D(self.n_fmap[self.n_blocks - 1],
+                                              kernel_size=1,
+                                              padding=self.padding,
+                                              kernel_initializer=kernel_initializer),
+                                      name='from_channels_{}'.format(self.n_blocks - 1))(in_image)
+            x1 = self.dis_block(x1, self.n_blocks - 1)
+            x1 = AveragePooling2D()(x1)
+
+            # Get input for previous block
+            x2 = AveragePooling2D()(in_image)
+            x2 = EqualizeLearningRate(Conv2D(self.n_fmap[self.n_blocks - 2],
+                                              kernel_size=1,
+                                              padding=self.padding,
+                                              kernel_initializer=kernel_initializer),
+                                      name='from_channels_{}'.format(self.n_blocks - 2))(x2)
+
+            # Combine using weighted sum
+            x1 = Multiply()([alpha, x1])
+            x2 = Multiply()([1 - alpha, x2])
+            x = Add()([x1, x2])
+
+            # Remaining blocks
+            for i in range(self.n_blocks - 2, 0, -1):
+                x = self.dis_block(x, i)
+                x = AveragePooling2D()(x)
+
+        else:
+            x = EqualizeLearningRate(Conv2D(self.n_fmap[self.n_blocks - 1],
+                                              kernel_size=1,
+                                              padding=self.padding,
+                                              kernel_initializer=kernel_initializer),
+                                      name='from_channels_{}'.format(self.n_blocks))(in_image)
 
         # Output block
         x = MinibatchStdev()(x)
@@ -174,4 +181,6 @@ class ProgressiveGAN(object):
         x = Flatten()(x)
         x = EqualizeLearningRate(Dense(1), name='base_dense')(x)
 
-        return Model(inputs=[in_image, alpha], outputs=x)
+        model = Model(inputs=[in_image, alpha], outputs=x, name='dis')
+
+        return model

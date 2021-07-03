@@ -7,10 +7,6 @@ from model import *
 LAMBDA = 10
 
 
-def random_latents(latent_size, n):
-    return np.random.normal(0.0, 1.0, size=[n, latent_size])
-
-
 def load_real_samples(filename):
     data = np.load(filename)
     X = data['arr_0']
@@ -49,6 +45,7 @@ class TrainingSession(object):
                            'block': 0,
                            'steps': 0,
                            'latent_size': latent_size,
+                           'channels': channels,
                            'n_fmap': n_fmap,
                            'n_blocks': n_blocks,
                            'block_batch_sizes': list(block_batch_sizes),
@@ -64,8 +61,8 @@ class TrainingSession(object):
         self.data_path = self.config['data_path']
         self.sample_latents = np.asarray(self.config['sample_latents'])
 
-        self.gan = ProgressiveGAN(latent_size=100,
-                                  channels=1,
+        self.gan = ProgressiveGAN(latent_size=self.config['latent_size'],
+                                  channels=self.config['channels'],
                                   n_blocks=self.block + 1,
                                   n_fmap=self.config['n_fmap'][:self.block + 1])
 
@@ -209,18 +206,3 @@ class TrainingSession(object):
 
         save_image(c1, 'gen', self.block, self.steps, self.session_id)
         print('--Images saved')
-
-
-if __name__ == '__main__':
-
-    ts = TrainingSession('pgf1',
-                         n_blocks=7,
-                         latent_size=100,
-                         channels=1,
-                         init_res=4,
-                         n_fmap=[512, 512, 512, 512, 256, 128, 64],
-                         block_batch_sizes=[16, 16, 16, 16, 8, 8, 4],
-                         block_steps=[100000, 100000, 100000, 100000, 100000, 100000, 100000],
-                         data_path=root_dir + 'data/vfp_256.npz')
-
-    ts.train_block()

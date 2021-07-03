@@ -7,6 +7,10 @@ from layer import *
 root_dir = ''
 
 
+def random_latents(latent_size, n):
+    return np.random.normal(0.0, 1.0, size=[n, latent_size])
+
+
 def save_weights(model, name, block, num, session):
     path = root_dir + 'models/' + session + '/'
     if not os.path.exists(path):

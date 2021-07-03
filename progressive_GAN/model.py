@@ -25,6 +25,7 @@ class ProgressiveGAN(object):
         self.n_blocks = n_blocks
         self.init_res = init_res
         self.final_res = init_res * (2 ** (n_blocks - 1))
+        self.interm_res = None
         self.kernel_size = kernel_size
         self.padding = padding
         if isinstance(n_fmap, int):
@@ -184,3 +185,52 @@ class ProgressiveGAN(object):
         model = Model(inputs=[in_image, alpha], outputs=x, name='dis')
 
         return model
+
+    def build_gen_split(self, split_idx):
+
+        # Input block
+        in_latent = Input(shape=(self.latent_size,),
+                          name='input_latent')
+        alpha = Input(shape=1, name='input_alpha')
+
+        x = EqualizeLearningRate(Dense(self.n_fmap[0] * self.init_res * self.init_res,
+                                       kernel_initializer=kernel_initializer),
+                                 name='base_dense')(in_latent)
+        x = PixelNormalization()(x)
+        x = LeakyReLU()(x)
+        x = Reshape((self.init_res, self.init_res, self.n_fmap[0]))(x)
+        x = EqualizeLearningRate(Conv2D(self.n_fmap[0],
+                                        kernel_size=self.kernel_size,
+                                        padding=self.padding,
+                                        kernel_initializer=kernel_initializer),
+                                 name='base_conv')(x)
+        x = PixelNormalization()(x)
+        x = LeakyReLU()(x)
+
+        out_tile = None
+        in_tile = None
+
+        # Remaining blocks
+        for i in range(1, self.n_blocks):
+
+            if i == split_idx:
+                out_tile = x
+                self.interm_res = out_tile.shape[1]
+                in_tile = Input(shape=out_tile.shape[1:], name='tile_input')
+                x = in_tile
+
+            up = UpSampling2D()(x)
+            x = self.gen_block(up, i)
+
+
+        # Final block output
+        x = EqualizeLearningRate(Conv2D(self.channels,
+                                        kernel_size=1,
+                                        padding=self.padding,
+                                        kernel_initializer=kernel_initializer),
+                                 name='to_channels_{}'.format(self.n_blocks - 1))(x)
+
+        gen_a = Model(inputs=in_latent, outputs=out_tile)
+        gen_b = Model(inputs=in_tile, outputs=x)
+
+        return gen_a, gen_b

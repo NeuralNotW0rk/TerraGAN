@@ -94,7 +94,7 @@ class TerrainGenerator:
             # plt.imshow(self.latent_field[:, :, i])
             # plt.show()
 
-    def process_latent_field(self, stride):
+    def process_latent_field(self, stride, blend=True):
 
         print('Processing latent field...')
 
@@ -103,17 +103,21 @@ class TerrainGenerator:
         output_tile_res = int(self.tile_res * self.b_scaling)
         output_shape = [output_res, output_res, self.gan.channels]
 
-        weight_mask = np.zeros(shape=[output_tile_res, output_tile_res, self.gan.channels])
-        center = np.asarray([output_tile_res / 2, output_tile_res / 2])
-        max_weight = np.linalg.norm(center)
-        for i in range(output_tile_res):
-            for j in range(output_tile_res):
-                pixel = np.asarray([i, j])
-                weight_mask[i, j, :] = (max_weight - np.linalg.norm(center - pixel)) ** 4 + 1
+        # Blending variables
+        weight_mask = None
+        overlap_map = None
+        if blend:
+            weight_mask = np.zeros(shape=[output_tile_res, output_tile_res, self.gan.channels])
+            center = np.asarray([output_tile_res / 2, output_tile_res / 2])
+            max_weight = np.linalg.norm(center)
+            for i in range(output_tile_res):
+                for j in range(output_tile_res):
+                    pixel = np.asarray([i, j])
+                    weight_mask[i, j, :] = (max_weight - np.linalg.norm(center - pixel)) ** 4 + 1
+            overlap_map = np.zeros(shape=output_shape)
 
         # Initialize output
         output = np.zeros(shape=output_shape)
-        overlap_map = np.zeros(shape=output_shape)
 
         # Move gen_b across latent field
         steps = int((self.latent_field.shape[0] - 1) / stride)
@@ -128,34 +132,35 @@ class TerrainGenerator:
 
                 # Generate image from tile
                 tile_b = self.gen_b.predict(np.asarray([tile_a]))[0]
-                tile_b *= weight_mask
 
                 # Add pixels on top of final output
                 ib = int(ia * self.b_scaling)
                 jb = int(ja * self.b_scaling)
 
-                output[ib:ib + output_tile_res, jb:jb + output_tile_res] += tile_b
-                overlap_map[ib:ib + output_tile_res, jb:jb + output_tile_res] += weight_mask
+                if blend:
+                    tile_b *= weight_mask
+                    output[ib:ib + output_tile_res, jb:jb + output_tile_res] += tile_b
+                    overlap_map[ib:ib + output_tile_res, jb:jb + output_tile_res] += weight_mask
+                else:
+                    output[ib:ib + output_tile_res, jb:jb + output_tile_res] = tile_b
 
-        print('Merging...')
-        output /= overlap_map
+        if blend:
+            output /= overlap_map
 
         return output
 
 
 if __name__ == '__main__':
 
-    k = 2
+    tg = TerrainGenerator('pgf1', segment_idx=2)
 
-    tg = TerrainGenerator('pgf1', segment_idx=k)
+    tg.random_latent_field(field_res=64, overlap=4)
 
-    tg.random_latent_field(field_res=2 ** (k + 4), overlap=2 ** k)
-
-    out = tg.process_latent_field(stride=2 ** k)
+    out = tg.process_latent_field(stride=4, blend=False)
 
     out = np.clip((out + 1.0) / 2.0, 0.0, 1.0)
 
     print(np.amin(out), np.amax(out))
 
-    util.save_image(out, 'pg_1', 6, k, 'tiling_test')
+    util.save_image(out, 'pg_1_replace', 6, 2, 'tiling_test')
 

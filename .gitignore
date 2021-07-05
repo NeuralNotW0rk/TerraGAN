@@ -11,3 +11,4 @@ style_GAN/results/
 terrain_utils/data/
 terrain_utils/raw_data/
 *.pyc
+*.h5

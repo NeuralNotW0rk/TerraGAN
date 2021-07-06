@@ -1,14 +1,14 @@
 
 .idea/
-progressive_GAN/data/
-progressive_GAN/config/
-progressive_GAN/models/
-progressive_GAN/results/
 style_GAN/data/
 style_GAN/config/
 style_GAN/models/
 style_GAN/results/
 terrain_utils/data/
 terrain_utils/raw_data/
+terrain_utils/config/
+terrain_utils/models/
+terrain_utils/results/
 *.pyc
 *.h5
+*.json

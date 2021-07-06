@@ -234,3 +234,32 @@ class ProgressiveGAN(object):
         gen_b = Model(inputs=in_tile, outputs=x)
 
         return gen_a, gen_b
+
+
+class SemanticMap(object):
+    
+    def __init__(self,
+                 n_semantics=3,
+                 latent_size_in=100,
+                 latent_size_out=100,
+                 n_hidden_layers=4,
+                 n_nodes=128):
+        
+        self.n_semantics = n_semantics
+        self.latent_size_in = latent_size_in
+        self.latent_size_out = latent_size_out
+        self.n_hidden_layers = n_hidden_layers
+        self.n_nodes = n_nodes
+    
+    def build_map(self):
+
+        # Input
+        in_latent = Input(shape=[self.latent_size_in])
+        x = in_latent
+
+        # Dense layers
+        for i in range(self.n_hidden_layers):
+            x = Dense(self.n_nodes, activation='relu')(x)
+
+        # Output
+        x = Dense()

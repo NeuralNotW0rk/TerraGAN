@@ -51,14 +51,13 @@ def hgt_to_jpg(file, target, x, y, image=True):
         pos = np.random.randint(0, d - sample_size, 2)
         sample = np.copy(hgt[pos[0]:pos[0] + sample_size, pos[1]:pos[1] + sample_size])
         sample = np.rot90(sample, k=np.random.randint(0, 4), axes=[0, 1])
-        mean = np.mean(sample) / max_elevation
         s_min = np.amin(sample)
         s_max = np.amax(sample)
-        scale = (s_max - s_min) / max_elevation
         sample = (sample - s_min) / (s_max - s_min)
         sample = np.expand_dims(sample, axis=-1)
         x.append(sample)
-        y.append([mean, scale])
+        y.append([s_min / max_elevation, s_max / max_elevation])
+
         if image:
             rgb = np.zeros(shape=[sample_size, sample_size, 3])
             rgb[:, :, 0] = sample[:, :, 0]
@@ -87,7 +86,7 @@ data_archive = 'data/vfp_256_labeled.npz'
 
 x = []
 y = []
-process_all(raw_dir, img_dir, x, y, True)
+process_all(raw_dir, img_dir, x, y, False)
 x = np.asarray(x)
 y = np.asarray(y)
 print(x.shape, y.shape)

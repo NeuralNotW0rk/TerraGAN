@@ -1,7 +1,5 @@
-from tensorflow.keras.models import Sequential, Model
+from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Dense, Flatten, Reshape, Conv2D, UpSampling2D, AveragePooling2D, LeakyReLU, Multiply, Add
-from tensorflow.keras.constraints import max_norm
-from tensorflow.keras.initializers import RandomNormal
 
 from layer import *
 from util import *
@@ -133,9 +131,9 @@ class ProgressiveGAN(object):
         if self.n_blocks > 1:
             # Get input for latest block
             x1 = EqualizeLearningRate(Conv2D(self.n_fmap[self.n_blocks - 1],
-                                              kernel_size=1,
-                                              padding=self.padding,
-                                              kernel_initializer=kernel_initializer),
+                                             kernel_size=1,
+                                             padding=self.padding,
+                                             kernel_initializer=kernel_initializer),
                                       name='from_channels_{}'.format(self.n_blocks - 1))(in_image)
             x1 = self.dis_block(x1, self.n_blocks - 1)
             x1 = AveragePooling2D()(x1)
@@ -143,9 +141,9 @@ class ProgressiveGAN(object):
             # Get input for previous block
             x2 = AveragePooling2D()(in_image)
             x2 = EqualizeLearningRate(Conv2D(self.n_fmap[self.n_blocks - 2],
-                                              kernel_size=1,
-                                              padding=self.padding,
-                                              kernel_initializer=kernel_initializer),
+                                             kernel_size=1,
+                                             padding=self.padding,
+                                             kernel_initializer=kernel_initializer),
                                       name='from_channels_{}'.format(self.n_blocks - 2))(x2)
 
             # Combine using weighted sum
@@ -160,10 +158,10 @@ class ProgressiveGAN(object):
 
         else:
             x = EqualizeLearningRate(Conv2D(self.n_fmap[self.n_blocks - 1],
-                                              kernel_size=1,
-                                              padding=self.padding,
-                                              kernel_initializer=kernel_initializer),
-                                      name='from_channels_{}'.format(self.n_blocks))(in_image)
+                                            kernel_size=1,
+                                            padding=self.padding,
+                                            kernel_initializer=kernel_initializer),
+                                     name='from_channels_{}'.format(self.n_blocks - 1))(in_image)
 
         # Output block
         x = MinibatchStdev()(x)
@@ -191,7 +189,6 @@ class ProgressiveGAN(object):
         # Input block
         in_latent = Input(shape=(self.latent_size,),
                           name='input_latent')
-        alpha = Input(shape=1, name='input_alpha')
 
         x = EqualizeLearningRate(Dense(self.n_fmap[0] * self.init_res * self.init_res,
                                        kernel_initializer=kernel_initializer),
@@ -222,7 +219,6 @@ class ProgressiveGAN(object):
             up = UpSampling2D()(x)
             x = self.gen_block(up, i)
 
-
         # Final block output
         x = EqualizeLearningRate(Conv2D(self.channels,
                                         kernel_size=1,
@@ -230,36 +226,46 @@ class ProgressiveGAN(object):
                                         kernel_initializer=kernel_initializer),
                                  name='to_channels_{}'.format(self.n_blocks - 1))(x)
 
-        gen_a = Model(inputs=in_latent, outputs=out_tile)
-        gen_b = Model(inputs=in_tile, outputs=x)
+        gen_a = Model(inputs=in_latent, outputs=out_tile, name='gen_a')
+        gen_b = Model(inputs=in_tile, outputs=x, name='gen_b')
 
         return gen_a, gen_b
 
+    def build_semantic_predictor(self, semantics):
 
-class SemanticMap(object):
-    
-    def __init__(self,
-                 n_semantics=3,
-                 latent_size_in=100,
-                 latent_size_out=100,
-                 n_hidden_layers=4,
-                 n_nodes=128):
-        
-        self.n_semantics = n_semantics
-        self.latent_size_in = latent_size_in
-        self.latent_size_out = latent_size_out
-        self.n_hidden_layers = n_hidden_layers
-        self.n_nodes = n_nodes
-    
-    def build_map(self):
+        name = '_'.join(semantics)
 
         # Input
-        in_latent = Input(shape=[self.latent_size_in])
-        x = in_latent
+        in_image = Input(shape=[self.final_res, self.final_res, self.channels], name='input_image')
 
-        # Dense layers
-        for i in range(self.n_hidden_layers):
-            x = Dense(self.n_nodes, activation='relu')(x)
+        x = EqualizeLearningRate(Conv2D(self.n_fmap[self.n_blocks - 1],
+                                        kernel_size=1,
+                                        padding=self.padding,
+                                        kernel_initializer=kernel_initializer),
+                                 name='from_channels_{}'.format(self.n_blocks - 1))(in_image)
 
-        # Output
-        x = Dense()
+        # Blocks
+        for i in range(self.n_blocks - 1, 0, -1):
+            x = self.dis_block(x, i)
+            x = AveragePooling2D()(x)
+
+        # Output block
+        x = MinibatchStdev()(x)
+        x = EqualizeLearningRate(Conv2D(self.n_fmap[0],
+                                        kernel_size=3,
+                                        padding=self.padding,
+                                        kernel_initializer=kernel_initializer),
+                                 name='base_conv1')(x)
+        x = LeakyReLU()(x)
+        x = EqualizeLearningRate(Conv2D(self.n_fmap[0],
+                                        kernel_size=4,
+                                        padding='valid',
+                                        kernel_initializer=kernel_initializer),
+                                 name='base_conv2')(x)
+        x = LeakyReLU()(x)
+        x = Flatten()(x)
+        x = EqualizeLearningRate(Dense(len(semantics)), name='{}_dense'.format(name))(x)
+
+        model = Model(inputs=in_image, outputs=x, name='semantic_pred')
+
+        return model

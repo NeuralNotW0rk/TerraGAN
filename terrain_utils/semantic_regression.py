@@ -1,5 +1,5 @@
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization
 
 import numpy as np
 
@@ -13,12 +13,12 @@ def build_model(features, n_conv_layers, n_fmap, input_shape,
 
     model = Sequential()
     model.add(Conv2D(n_fmap[0], kernel_size=3, padding=padding, activation=activation, input_shape=input_shape))
-    model.add(Conv2D(n_fmap[0], kernel_size=3, padding=padding, activation=activation, input_shape=input_shape))
+    model.add(BatchNormalization())
     model.add(MaxPooling2D())
 
     for i in range(1, n_conv_layers):
         model.add(Conv2D(n_fmap[i], kernel_size=3, padding=padding, activation=activation))
-        model.add(Conv2D(n_fmap[i], kernel_size=3, padding=padding, activation=activation))
+        model.add(BatchNormalization())
         model.add(MaxPooling2D())
 
     model.add(Flatten())
@@ -34,12 +34,12 @@ def build_model(features, n_conv_layers, n_fmap, input_shape,
 
 if __name__ == '__main__':
 
-    model = build_model(2, 6, [16, 32, 64, 128, 128, 128, 128], input_shape=[256, 256, 1])
+    model = build_model(2, 6, [32, 64, 128, 256, 256, 256, 256], input_shape=[256, 256, 1])
     model.summary()
 
     data = np.load(data_path)
 
-    model.fit(x=data['x'], y=data['y'], batch_size=16, epochs=25, validation_split=0.2, verbose=2)
+    model.fit(x=data['x'], y=data['y'], batch_size=16, epochs=50, validation_split=0.2, verbose=2)
 
     x = data['x'][0:1]
     y = model.predict(x)

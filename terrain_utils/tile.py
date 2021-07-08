@@ -13,9 +13,9 @@ class TerrainGenerator:
 
     def __init__(self, session, segment_idx, steps=None):
 
-        self.config_path = os.path.join('config', session + '.json')
-        with open(self.config_path) as config_file:
-            self.config = json.load(config_file)
+        config_path = os.path.join('config', session + '.json')
+        self.config = Config(config_path)
+        self.config.load()
 
         self.segment_idx = segment_idx
 
@@ -30,9 +30,6 @@ class TerrainGenerator:
             self.steps = self.config['steps']
         else:
             self.steps = steps
-
-        def weight_path(name): return 'models/' + session + '/' + name + '_' + str(self.gan.n_blocks)\
-                                      + '_' + str(self.steps) + '.h5'
 
         load_weights(self.gen_a, 'gen', self.gan.n_blocks - 1, self.steps, session)
         load_weights(self.gen_b, 'gen', self.gan.n_blocks - 1, self.steps, session)

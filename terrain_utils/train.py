@@ -1,57 +1,61 @@
 from tensorflow.keras.optimizers import Adam
 
-import json
-
 from model import *
+from util import *
 
 LAMBDA = 10
 
 
 def load_real_samples(filename):
-    data = np.load(filename)
-    X = data['arr_0']
-    X = X.astype('float32')
-    X = (X - 0.5) * 2.0
 
-    return X
+    data = np.load(filename)
+    x = (data['x'] - 0.5) * 2.0
+    y = data['y']
+
+    return x, y
 
 
 class TrainingSession(object):
 
+    def __init__(self, session_id):
+
+        self.session_id = session_id
+        config_path = root_dir + 'config/' + self.session_id + '.json'
+        self.config = Config(config_path)
+        self.config.load()
+
+
+class PGGANTrainingSession(TrainingSession):
+
     def __init__(self,
                  session_id,
-                 n_blocks=6,
                  latent_size=100,
-                 channels=3,
-                 init_res=4,
+                 channels=1,
                  n_fmap=None,
+                 n_blocks=None,
                  block_batch_sizes=None,
                  block_steps=None,
                  data_path=None):
 
-        self.session_id = session_id
+        super(TrainingSession, self).__init__(session_id)
 
-        self.config_path = root_dir + 'config/' + self.session_id + '.json'
-
-        # Session config already exists
-        if os.path.exists(self.config_path):
-            with open(self.config_path) as config_file:
-                self.config = json.load(config_file)
-        else:
+        try:
+            self.config['pggan']
+        except KeyError:
             sample_latents = []
             for latent in list(random_latents(latent_size, 64)):
                 sample_latents.append(list(latent))
-            self.config = {'id': self.session_id,
-                           'block': 0,
-                           'steps': 0,
-                           'latent_size': latent_size,
-                           'channels': channels,
-                           'n_fmap': n_fmap,
-                           'n_blocks': n_blocks,
-                           'block_batch_sizes': list(block_batch_sizes),
-                           'block_steps': list(block_steps),
-                           'data_path': data_path,
-                           'sample_latents': sample_latents}
+            self.config.update({'pggan': True,
+                                'block': 0,
+                                'steps': 0,
+                                'latent_size': latent_size,
+                                'channels': channels,
+                                'n_fmap': n_fmap,
+                                'n_blocks': n_blocks,
+                                'block_batch_sizes': list(block_batch_sizes),
+                                'block_steps': list(block_steps),
+                                'data_path': data_path,
+                                'sample_latents': sample_latents})
 
         self.block = self.config['block']
         self.steps = self.config['steps']
@@ -71,19 +75,21 @@ class TrainingSession(object):
 
         if self.steps > 0:
             print('Loading from save point...')
-            load_weights(self.gen, 'gen', self.block, self.steps, self.session_id)
-            load_weights(self.dis, 'dis', self.block, self.steps, self.session_id)
+            version = str(self.block) + '_' + str(self.steps)
+            load_weights(self.gen, 'gen', version, self.session_id)
+            load_weights(self.dis, 'dis', version, self.session_id)
         elif self.block > 0:
             print('Loading previous version weights...')
-            load_weights(self.gen, 'gen', self.block - 1, self.block_steps[self.block - 1], self.session_id)
-            load_weights(self.dis, 'dis', self.block - 1, self.block_steps[self.block - 1], self.session_id)
+            version = str(self.block - 1) + '_' + str(self.block_steps[self.block - 1])
+            load_weights(self.gen, 'gen', version, self.session_id)
+            load_weights(self.dis, 'dis', version, self.session_id)
         else:
             print('Building new model...')
 
         self.gen_opt = Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8)
         self.dis_opt = Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8)
 
-        self.dataset = load_real_samples(data_path)
+        self.dataset, _ = load_real_samples(self.data_path)
         self.scaled_dataset = tf.image.resize(self.dataset, [self.gan.final_res, self.gan.final_res]).numpy()
 
     def real_images(self, n_samples):
@@ -183,13 +189,13 @@ class TrainingSession(object):
             print('Final block training complete')
 
     def save(self):
-        save_weights(self.gen, 'gen', self.block, self.steps, self.session_id)
-        save_weights(self.dis, 'dis', self.block, self.steps, self.session_id)
+        version = str(self.block) + '_' + str(self.steps)
+        save_weights(self.gen, 'gen', version, self.session_id)
+        save_weights(self.dis, 'dis', version, self.session_id)
 
         self.config['block'] = self.block
         self.config['steps'] = self.steps
-        with open(self.config_path, 'w') as config_file:
-            config_file.write(json.dumps(self.config, indent=4))
+        self.config.save()
 
         print('--Weights saved')
 
@@ -206,3 +212,44 @@ class TrainingSession(object):
 
         save_image(c1, 'gen', self.block, self.steps, self.session_id)
         print('--Images saved')
+
+
+class SemanticPredictorTrainingSession(TrainingSession):
+
+    def __init__(self,
+                 session_id,
+                 semantics=None):
+
+        super(SemanticPredictorTrainingSession, self).__init__(session_id)
+
+        try:
+            self.config['sp_epochs']
+        except KeyError:
+            self.config.update({'sp_epochs': 0,
+                                'semantics': semantics})
+
+        self.sp_epochs = self.config['sp_epochs']
+        self.semantics = self.config['semantics']
+        self.data_path = self.config['data_path']
+
+        self.gan = ProgressiveGAN(latent_size=self.config['latent_size'],
+                                  channels=self.config['channels'],
+                                  n_blocks=self.config['n_blocks'],
+                                  n_fmap=self.config['n_fmap'])
+
+        self.sp = self.gan.build_semantic_predictor(self.semantics)
+        if self.sp_epochs == 0:
+            version = str(self.config['block']) + ' ' + str(self.config['steps'])
+            load_weights(self.sp, 'dis', version, session_id)
+        else:
+            load_weights(self.sp, 'sp', str(self.sp_epochs), self.session_id)
+        self.sp.compile(optimizer='adam', loss='mse')
+
+        self.x, self.y = load_real_samples(self.data_path)
+
+    def train_epochs(self, epochs):
+
+        self.sp.fit(self.x, self.y, batch_size=16, epochs=epochs, validation_split=0.2, verbose=2)
+
+        self.sp_epochs += epochs
+        save_weights(self.sp, 'sp', str(self.sp_epochs), self.session_id)

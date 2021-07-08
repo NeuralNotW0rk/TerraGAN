@@ -37,7 +37,7 @@ class PGGANTrainingSession(TrainingSession):
                  block_steps=None,
                  data_path=None):
 
-        super(TrainingSession, self).__init__(session_id)
+        super(PGGANTrainingSession, self).__init__(session_id)
 
         try:
             self.config['pggan']
@@ -65,22 +65,22 @@ class PGGANTrainingSession(TrainingSession):
         self.data_path = self.config['data_path']
         self.sample_latents = np.asarray(self.config['sample_latents'])
 
-        self.gan = ProgressiveGAN(latent_size=self.config['latent_size'],
-                                  channels=self.config['channels'],
-                                  n_blocks=self.block + 1,
-                                  n_fmap=self.config['n_fmap'][:self.block + 1])
+        self.pgg = PGGAN(latent_size=self.config['latent_size'],
+                         channels=self.config['channels'],
+                         n_blocks=self.block + 1,
+                         n_fmap=self.config['n_fmap'][:self.block + 1])
 
-        self.gen = self.gan.build_gen()
-        self.dis = self.gan.build_dis()
+        self.gen = self.pgg.build_gen()
+        self.dis = self.pgg.build_dis()
 
         if self.steps > 0:
             print('Loading from save point...')
-            version = str(self.block) + '_' + str(self.steps)
+            version = '{}_{}'.format(self.block, self.steps)
             load_weights(self.gen, 'gen', version, self.session_id)
             load_weights(self.dis, 'dis', version, self.session_id)
         elif self.block > 0:
             print('Loading previous version weights...')
-            version = str(self.block - 1) + '_' + str(self.block_steps[self.block - 1])
+            version = '{}_{}'.format(self.block - 1, self.block_steps[self.block - 1])
             load_weights(self.gen, 'gen', version, self.session_id)
             load_weights(self.dis, 'dis', version, self.session_id)
         else:
@@ -89,8 +89,8 @@ class PGGANTrainingSession(TrainingSession):
         self.gen_opt = Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8)
         self.dis_opt = Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8)
 
-        self.dataset, _ = load_real_samples(self.data_path)
-        self.scaled_dataset = tf.image.resize(self.dataset, [self.gan.final_res, self.gan.final_res]).numpy()
+        self.dataset, _ = load_real_samples(root_dir + self.data_path)
+        self.scaled_dataset = tf.image.resize(self.dataset, [self.pgg.final_res, self.pgg.final_res]).numpy()
 
     def real_images(self, n_samples):
 
@@ -151,7 +151,7 @@ class PGGANTrainingSession(TrainingSession):
         batch_size = self.block_batch_sizes[self.block]
 
         images = self.real_images(batch_size)
-        latents = random_latents(self.gan.latent_size, batch_size)
+        latents = random_latents(self.pgg.latent_size, batch_size)
         alpha = self.get_alpha(batch_size)
 
         d_loss, g_loss = self.compute_WGAN_GP(images, latents, batch_size, alpha)
@@ -189,7 +189,7 @@ class PGGANTrainingSession(TrainingSession):
             print('Final block training complete')
 
     def save(self):
-        version = str(self.block) + '_' + str(self.steps)
+        version = '{}_{}'.format(self.block, self.steps)
         save_weights(self.gen, 'gen', version, self.session_id)
         save_weights(self.dis, 'dis', version, self.session_id)
 
@@ -232,15 +232,14 @@ class SemanticPredictorTrainingSession(TrainingSession):
         self.semantics = self.config['semantics']
         self.data_path = self.config['data_path']
 
-        self.gan = ProgressiveGAN(latent_size=self.config['latent_size'],
-                                  channels=self.config['channels'],
-                                  n_blocks=self.config['n_blocks'],
-                                  n_fmap=self.config['n_fmap'])
+        self.pgg = PGGAN(latent_size=self.config['latent_size'],
+                         channels=self.config['channels'],
+                         n_blocks=self.config['n_blocks'],
+                         n_fmap=self.config['n_fmap'])
 
-        self.sp = self.gan.build_semantic_predictor(self.semantics)
+        self.sp = self.pgg.build_semantic_predictor(self.semantics)
         if self.sp_epochs == 0:
-            version = str(self.config['block']) + ' ' + str(self.config['steps'])
-            load_weights(self.sp, 'dis', version, session_id)
+            load_weights(self.sp, 'dis', '{}_{}'.format(self.config['block'], self.config['steps']), self.session_id)
         else:
             load_weights(self.sp, 'sp', str(self.sp_epochs), self.session_id)
         self.sp.compile(optimizer='adam', loss='mse')
@@ -253,3 +252,89 @@ class SemanticPredictorTrainingSession(TrainingSession):
 
         self.sp_epochs += epochs
         save_weights(self.sp, 'sp', str(self.sp_epochs), self.session_id)
+
+
+class LatentMapTrainingSession(TrainingSession):
+
+    def __init__(self,
+                 session_id,
+                 map_layers=4,
+                 map_units=256,
+                 map_batch=16):
+
+        super(LatentMapTrainingSession, self).__init__(session_id)
+
+        try:
+            self.config['map_layers']
+        except KeyError:
+            self.config.update({'map_steps': 0,
+                                'map_layers': map_layers,
+                                'map_units': map_units,
+                                'map_batch': map_batch})
+
+        self.map_steps = self.config['map_steps']
+        self.map_batch = self.config['map_batch']
+        self.semantics = self.config['semantics']
+        self.n_semantics = len(self.semantics)
+
+        self.pgg = PGGAN(latent_size=self.config['latent_size'],
+                         channels=self.config['channels'],
+                         n_blocks=self.config['n_blocks'],
+                         n_fmap=self.config['n_fmap'])
+
+        self.lm = LatentMap(latent_size_in=self.config['latent_size'],
+                            latent_size_out=self.config['latent_size'],
+                            n_hidden_layers=self.config['map_layers'],
+                            n_units=self.config['map_units'])
+
+        self.gen = self.pgg.build_gen_stable()
+        self.sp = self.pgg.build_semantic_predictor(self.semantics)
+        self.map = self.lm.build_model()
+
+        load_weights(self.gen, 'gen', '{}_{}'.format(self.config['block'], self.config['steps']), self.session_id)
+        load_weights(self.sp, 'sp', str(self.config['sp_epochs']), self.session_id)
+        if self.map_steps > 0:
+            load_weights(self.map, 'map', str(self.map_steps), self.session_id)
+
+        self.opt = Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8)
+
+    @tf.function
+    def compute_loss(self, latents):
+
+        with tf.GradientTape() as tape:
+            mapped_latents = self.map(latents, training=True)
+            images = self.gen(mapped_latents, training=False)
+            pred = self.sp(images, training=False) * 2.0 - 1.0
+            loss = tf.reduce_mean((pred - latents[:, :len(self.semantics)]) ** 2)
+
+        # Calculate the gradients for map
+        gradients = tape.gradient(loss, self.map.trainable_variables)
+
+        # Apply the gradients to the optimizer
+        self.opt.apply_gradients(zip(gradients, self.map.trainable_variables))
+
+        return loss
+
+    def train_step(self):
+
+        latents = random_latents(self.lm.latent_size_in, self.map_batch)
+
+        loss = self.compute_loss(latents)
+
+        if self.map_steps % 100 == 0:
+            print('\nStep ' + str(self.map_steps) + ':')
+            print('Loss:', loss.numpy())
+
+        if self.map_steps % 1000 == 0:
+            self.save()
+
+        self.map_steps += 1
+
+    def save(self):
+        save_weights(self.map, 'map', str(self.map_steps), self.session_id)
+
+        self.config['map_steps'] = self.map_steps
+        self.config.save()
+
+        print('--Weights saved')
+

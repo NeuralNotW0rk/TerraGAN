@@ -19,25 +19,25 @@ class TerrainGenerator:
 
         self.segment_idx = segment_idx
 
-        self.gan = ProgressiveGAN(latent_size=self.config['latent_size'],
-                                  channels=self.config['channels'],
-                                  n_blocks=self.config['n_blocks'],
-                                  n_fmap=self.config['n_fmap'])
+        self.pgg = PGGAN(latent_size=self.config['latent_size'],
+                         channels=self.config['channels'],
+                         n_blocks=self.config['n_blocks'],
+                         n_fmap=self.config['n_fmap'])
 
-        self.gen_a, self.gen_b = self.gan.build_gen_split(segment_idx)
+        self.gen_a, self.gen_b = self.pgg.build_gen_stable(segment_idx)
 
         if steps is None:
             self.steps = self.config['steps']
         else:
             self.steps = steps
 
-        load_weights(self.gen_a, 'gen', self.gan.n_blocks - 1, self.steps, session)
-        load_weights(self.gen_b, 'gen', self.gan.n_blocks - 1, self.steps, session)
+        load_weights(self.gen_a, 'gen', self.pgg.n_blocks - 1, self.steps, session)
+        load_weights(self.gen_b, 'gen', self.pgg.n_blocks - 1, self.steps, session)
 
         self.latent_field = None
         self.tiles_per_row = 0
-        self.tile_res = self.gan.interm_res
-        self.b_scaling = self.gan.final_res / self.tile_res
+        self.tile_res = self.pgg.interm_res
+        self.b_scaling = self.pgg.final_res / self.tile_res
 
         print('Initialization complete')
 
@@ -63,7 +63,7 @@ class TerrainGenerator:
             for j in range(self.tiles_per_row):
 
                 # Inputs
-                latent = random_latents(self.gan.latent_size, 1)
+                latent = random_latents(self.pgg.latent_size, 1)
 
                 # Generate intermediate latent tiles
                 tile = self.gen_a.predict(latent)[0]
@@ -98,13 +98,13 @@ class TerrainGenerator:
         # Variables
         output_res = int(self.latent_field.shape[0] * self.b_scaling)
         output_tile_res = int(self.tile_res * self.b_scaling)
-        output_shape = [output_res, output_res, self.gan.channels]
+        output_shape = [output_res, output_res, self.pgg.channels]
 
         # Blending variables
         weight_mask = None
         overlap_map = None
         if blend:
-            weight_mask = np.zeros(shape=[output_tile_res, output_tile_res, self.gan.channels])
+            weight_mask = np.zeros(shape=[output_tile_res, output_tile_res, self.pgg.channels])
             center = np.asarray([output_tile_res / 2, output_tile_res / 2])
             max_weight = np.linalg.norm(center)
             for i in range(output_tile_res):

@@ -7,7 +7,7 @@ from util import *
 kernel_initializer = 'he_normal'
 
 
-class ProgressiveGAN(object):
+class PGGAN:
 
     def __init__(self,
                  latent_size=100,
@@ -58,7 +58,7 @@ class ProgressiveGAN(object):
                           name='input_latent')
         alpha = Input(shape=1, name='input_alpha')
 
-        x = EqualizeLearningRate(Dense(self.n_fmap[0] * self.init_res * self.init_res,
+        x = EqualizeLearningRate(Dense(units=self.n_fmap[0] * self.init_res * self.init_res,
                                        kernel_initializer=kernel_initializer),
                                  name='base_dense')(in_latent)
         x = PixelNormalization()(x)
@@ -178,19 +178,19 @@ class ProgressiveGAN(object):
                                  name='base_conv2')(x)
         x = LeakyReLU()(x)
         x = Flatten()(x)
-        x = EqualizeLearningRate(Dense(1), name='base_dense')(x)
+        x = EqualizeLearningRate(Dense(units=1), name='base_dense')(x)
 
         model = Model(inputs=[in_image, alpha], outputs=x, name='dis')
 
         return model
 
-    def build_gen_split(self, split_idx):
+    def build_gen_stable(self, split_idx=-1):
 
         # Input block
         in_latent = Input(shape=(self.latent_size,),
                           name='input_latent')
 
-        x = EqualizeLearningRate(Dense(self.n_fmap[0] * self.init_res * self.init_res,
+        x = EqualizeLearningRate(Dense(units=self.n_fmap[0] * self.init_res * self.init_res,
                                        kernel_initializer=kernel_initializer),
                                  name='base_dense')(in_latent)
         x = PixelNormalization()(x)
@@ -226,10 +226,13 @@ class ProgressiveGAN(object):
                                         kernel_initializer=kernel_initializer),
                                  name='to_channels_{}'.format(self.n_blocks - 1))(x)
 
-        gen_a = Model(inputs=in_latent, outputs=out_tile, name='gen_a')
-        gen_b = Model(inputs=in_tile, outputs=x, name='gen_b')
+        if split_idx > 0:
+            gen_a = Model(inputs=in_latent, outputs=out_tile, name='gen_a')
+            gen_b = Model(inputs=in_tile, outputs=x, name='gen_b')
+            return gen_a, gen_b
 
-        return gen_a, gen_b
+        gen = Model(inputs=in_latent, outputs=x, name='gen')
+        return gen
 
     def build_semantic_predictor(self, semantics):
 
@@ -264,8 +267,35 @@ class ProgressiveGAN(object):
                                  name='base_conv2')(x)
         x = LeakyReLU()(x)
         x = Flatten()(x)
-        x = EqualizeLearningRate(Dense(len(semantics)), name='{}_dense'.format(name))(x)
+        x = EqualizeLearningRate(Dense(units=len(semantics)), name='{}_dense'.format(name))(x)
 
         model = Model(inputs=in_image, outputs=x, name='semantic_pred')
 
         return model
+
+
+class LatentMap:
+
+    def __init__(self,
+                 latent_size_in=100,
+                 latent_size_out=100,
+                 n_hidden_layers=4,
+                 n_units=256):
+
+        self.latent_size_in = latent_size_in
+        self.latent_size_out = latent_size_out
+        self.n_hidden_layers = n_hidden_layers
+        self.n_units = n_units
+
+    def build_model(self):
+
+        in_z = Input(shape=[self.latent_size_in])
+        x = in_z
+        for i in range(self.n_hidden_layers):
+            x = Dense(units=self.n_units, kernel_initializer=kernel_initializer)(x)
+            x = LeakyReLU()(x)
+
+        x = Dense(units=self.latent_size_out, kernel_initializer=kernel_initializer)(x)
+        x = LeakyReLU()(x)
+
+        return Model(inputs=in_z, outputs=x, name='latent_map')

@@ -244,7 +244,7 @@ class SemanticPredictorTrainingSession(TrainingSession):
             load_weights(self.sp, 'sp', str(self.sp_epochs), self.session_id)
         self.sp.compile(optimizer='adam', loss='mse')
 
-        self.x, self.y = load_real_samples(self.data_path)
+        self.x, self.y = load_real_samples(root_dir + self.data_path)
 
     def train_epochs(self, epochs):
 
@@ -253,88 +253,17 @@ class SemanticPredictorTrainingSession(TrainingSession):
         self.sp_epochs += epochs
         save_weights(self.sp, 'sp', str(self.sp_epochs), self.session_id)
 
+    def generate_latent_scores(self, n_latents=10000, batch_size=16):
 
-class LatentMapTrainingSession(TrainingSession):
+        gen = self.pgg.build_gen_stable()
+        load_weights(gen, 'gen', '{}_{}'.format(self.config['block'], self.config['steps']), self.session_id)
 
-    def __init__(self,
-                 session_id,
-                 map_layers=4,
-                 map_units=256,
-                 map_batch=16):
+        latents = random_latents(self.pgg.latent_size, n_latents)
+        print('Generating images from latents...')
+        imgs = gen.predict(latents, batch_size=batch_size, verbose=1)
+        print('Scoring images...')
+        scores = self.sp.predict(imgs, batch_size=batch_size, verbose=1)
 
-        super(LatentMapTrainingSession, self).__init__(session_id)
-
-        try:
-            self.config['map_layers']
-        except KeyError:
-            self.config.update({'map_steps': 0,
-                                'map_layers': map_layers,
-                                'map_units': map_units,
-                                'map_batch': map_batch})
-
-        self.map_steps = self.config['map_steps']
-        self.map_batch = self.config['map_batch']
-        self.semantics = self.config['semantics']
-        self.n_semantics = len(self.semantics)
-
-        self.pgg = PGGAN(latent_size=self.config['latent_size'],
-                         channels=self.config['channels'],
-                         n_blocks=self.config['n_blocks'],
-                         n_fmap=self.config['n_fmap'])
-
-        self.lm = LatentMap(latent_size_in=self.config['latent_size'],
-                            latent_size_out=self.config['latent_size'],
-                            n_hidden_layers=self.config['map_layers'],
-                            n_units=self.config['map_units'])
-
-        self.gen = self.pgg.build_gen_stable()
-        self.sp = self.pgg.build_semantic_predictor(self.semantics)
-        self.map = self.lm.build_model()
-
-        load_weights(self.gen, 'gen', '{}_{}'.format(self.config['block'], self.config['steps']), self.session_id)
-        load_weights(self.sp, 'sp', str(self.config['sp_epochs']), self.session_id)
-        if self.map_steps > 0:
-            load_weights(self.map, 'map', str(self.map_steps), self.session_id)
-
-        self.opt = Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8)
-
-    @tf.function
-    def compute_loss(self, latents):
-
-        with tf.GradientTape() as tape:
-            mapped_latents = self.map(latents, training=True)
-            images = self.gen(mapped_latents, training=False)
-            pred = self.sp(images, training=False) * 2.0 - 1.0
-            loss = tf.reduce_mean((pred - latents[:, :len(self.semantics)]) ** 2)
-
-        # Calculate the gradients for map
-        gradients = tape.gradient(loss, self.map.trainable_variables)
-
-        # Apply the gradients to the optimizer
-        self.opt.apply_gradients(zip(gradients, self.map.trainable_variables))
-
-        return loss
-
-    def train_step(self):
-
-        latents = random_latents(self.lm.latent_size_in, self.map_batch)
-
-        loss = self.compute_loss(latents)
-
-        if self.map_steps % 100 == 0:
-            print('\nStep ' + str(self.map_steps) + ':')
-            print('Loss:', loss.numpy())
-
-        if self.map_steps % 1000 == 0:
-            self.save()
-
-        self.map_steps += 1
-
-    def save(self):
-        save_weights(self.map, 'map', str(self.map_steps), self.session_id)
-
-        self.config['map_steps'] = self.map_steps
-        self.config.save()
-
-        print('--Weights saved')
-
+        data_archive = root_dir + 'data/' + self.session_id + '_scores_' + '_'.join(self.semantics) + '.npz'
+        np.savez_compressed(data_archive, latents=latents, scores=scores)
+        print('--Scores saved')

@@ -6,16 +6,15 @@ import util
 
 from model import *
 from util import *
+from latent_manipulation import *
 import noise as gn
 
 
-class TerrainGenerator:
+class TerrainGenerator(Session):
 
     def __init__(self, session, segment_idx, steps=None):
 
-        config_path = os.path.join('config', session + '.json')
-        self.config = Config(config_path)
-        self.config.load()
+        super(TerrainGenerator, self).__init__(session)
 
         self.segment_idx = segment_idx
 
@@ -31,8 +30,9 @@ class TerrainGenerator:
         else:
             self.steps = steps
 
-        load_weights(self.gen_a, 'gen', self.pgg.n_blocks - 1, self.steps, session)
-        load_weights(self.gen_b, 'gen', self.pgg.n_blocks - 1, self.steps, session)
+        version = '{}_{}'.format(self.pgg.n_blocks - 1, self.steps)
+        load_weights(self.gen_a, 'gen', version, self.session_id)
+        load_weights(self.gen_b, 'gen', version, self.session_id)
 
         self.latent_field = None
         self.tiles_per_row = 0
@@ -43,6 +43,8 @@ class TerrainGenerator:
 
     def random_latent_field(self, field_res, cropping=0, overlap=0):
         print('Generating random latent field...')
+
+        lm = LatentManipulator(self.session_id)
 
         output_tile_res = self.tile_res - (2 * cropping)
         self.tiles_per_row = int((field_res - overlap) / (output_tile_res - overlap))
@@ -60,10 +62,12 @@ class TerrainGenerator:
                 weight_mask[i, j, :] = (max_weight - np.linalg.norm(center - pixel)) ** 4 + 1
 
         for i in range(self.tiles_per_row):
+            alpha = (i / (self.tiles_per_row - 1) * 2 - 1) * 0.75
             for j in range(self.tiles_per_row):
 
                 # Inputs
                 latent = random_latents(self.pgg.latent_size, 1)
+                latent = lm.move_latent(latent, 'max', alpha)
 
                 # Generate intermediate latent tiles
                 tile = self.gen_a.predict(latent)[0]
@@ -153,11 +157,11 @@ if __name__ == '__main__':
 
     tg.random_latent_field(field_res=64, overlap=4)
 
-    out = tg.process_latent_field(stride=4, blend=False)
+    out = tg.process_latent_field(stride=4, blend=True)
 
     out = np.clip((out + 1.0) / 2.0, 0.0, 1.0)
 
     print(np.amin(out), np.amax(out))
 
-    util.save_image(out, 'pg_1_replace', 6, 2, 'tiling_test')
+    util.save_image(out, 'pgf1_max', 6, 2, 'tiling_test')
 

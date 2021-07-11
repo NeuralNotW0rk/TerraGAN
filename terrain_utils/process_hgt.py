@@ -56,7 +56,7 @@ def hgt_to_jpg(file, target, x, y, image=True):
         sample = (sample - s_min) / (s_max - s_min)
         sample = np.expand_dims(sample, axis=-1)
         x.append(sample)
-        y.append([s_min / max_elevation, s_max / max_elevation])
+        y.append([s_min, s_max])
 
         if image:
             rgb = np.zeros(shape=[sample_size, sample_size, 3])

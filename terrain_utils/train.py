@@ -15,17 +15,7 @@ def load_real_samples(filename):
     return x, y
 
 
-class TrainingSession(object):
-
-    def __init__(self, session_id):
-
-        self.session_id = session_id
-        config_path = root_dir + 'config/' + self.session_id + '.json'
-        self.config = Config(config_path)
-        self.config.load()
-
-
-class PGGANTrainingSession(TrainingSession):
+class PGGANTrainer(Session):
 
     def __init__(self,
                  session_id,
@@ -37,7 +27,7 @@ class PGGANTrainingSession(TrainingSession):
                  block_steps=None,
                  data_path=None):
 
-        super(PGGANTrainingSession, self).__init__(session_id)
+        super(PGGANTrainer, self).__init__(session_id)
 
         try:
             self.config['pggan']
@@ -214,13 +204,13 @@ class PGGANTrainingSession(TrainingSession):
         print('--Images saved')
 
 
-class SemanticPredictorTrainingSession(TrainingSession):
+class SemanticPredictorTrainer(Session):
 
     def __init__(self,
                  session_id,
                  semantics=None):
 
-        super(SemanticPredictorTrainingSession, self).__init__(session_id)
+        super(SemanticPredictorTrainer, self).__init__(session_id)
 
         try:
             self.config['sp_epochs']

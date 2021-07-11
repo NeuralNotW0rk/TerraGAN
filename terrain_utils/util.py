@@ -56,3 +56,11 @@ class Config(dict):
             config_file.write(json.dumps(self, indent=4))
 
 
+class Session(object):
+
+    def __init__(self, session_id):
+
+        self.session_id = session_id
+        config_path = root_dir + 'config/' + self.session_id + '.json'
+        self.config = Config(config_path)
+        self.config.load()

@@ -23,6 +23,7 @@ class PGGANTrainer(Session):
                  channels=1,
                  n_fmap=None,
                  n_blocks=None,
+                 block_types=None,
                  block_batch_sizes=None,
                  block_steps=None,
                  data_path=None):
@@ -42,8 +43,9 @@ class PGGANTrainer(Session):
                                 'channels': channels,
                                 'n_fmap': n_fmap,
                                 'n_blocks': n_blocks,
-                                'block_batch_sizes': list(block_batch_sizes),
-                                'block_steps': list(block_steps),
+                                'block_types': block_types,
+                                'block_batch_sizes': block_batch_sizes,
+                                'block_steps': block_steps,
                                 'data_path': data_path,
                                 'sample_latents': sample_latents})
 

@@ -4,8 +4,6 @@ from tensorflow.keras.layers import Input, Dense, Flatten, Reshape, Conv2D, UpSa
 from layer import *
 from util import *
 
-kernel_initializer = 'he_normal'
-
 
 class PGGAN:
 
@@ -13,18 +11,25 @@ class PGGAN:
                  latent_size=100,
                  channels=3,
                  n_blocks=7,
+                 block_types=None,
                  init_res=4,
                  kernel_size=3,
+                 kernel_initializer='he_normal',
                  padding='same',
                  n_fmap=None):
 
         self.latent_size = latent_size
         self.channels = channels
         self.n_blocks = n_blocks
+        if block_types is None:
+            self.block_types = ['resize'] * n_blocks
+        else:
+            self.block_types = block_types
         self.init_res = init_res
         self.final_res = init_res * (2 ** (n_blocks - 1))
         self.interm_res = None
         self.kernel_size = kernel_size
+        self.kernel_initializer = kernel_initializer,
         self.padding = padding
         if isinstance(n_fmap, int):
             self.n_fmap = [n_fmap] * n_blocks
@@ -37,21 +42,21 @@ class PGGAN:
         x = EqualizeLearningRate(Conv2D(self.n_fmap[block],
                                         kernel_size=self.kernel_size,
                                         padding=self.padding,
-                                        kernel_initializer=kernel_initializer),
+                                        kernel_initializer=self.kernel_initializer),
                                  name='block{}_conv1'.format(block))(x)
         x = PixelNormalization()(x)
         x = LeakyReLU()(x)
         x = EqualizeLearningRate(Conv2D(self.n_fmap[block],
                                         kernel_size=self.kernel_size,
                                         padding=self.padding,
-                                        kernel_initializer=kernel_initializer),
+                                        kernel_initializer=self.kernel_initializer),
                                  name='block{}_conv2'.format(block))(x)
         x = PixelNormalization()(x)
         x = LeakyReLU()(x)
 
         return x
 
-    def build_gen(self, fade_in=True):
+    def build_gen(self):
 
         # Input block
         in_latent = Input(shape=(self.latent_size,),
@@ -59,7 +64,7 @@ class PGGAN:
         alpha = Input(shape=1, name='input_alpha')
 
         x = EqualizeLearningRate(Dense(units=self.n_fmap[0] * self.init_res * self.init_res,
-                                       kernel_initializer=kernel_initializer),
+                                       kernel_initializer=self.kernel_initializer),
                                  name='base_dense')(in_latent)
         x = PixelNormalization()(x)
         x = LeakyReLU()(x)
@@ -67,25 +72,28 @@ class PGGAN:
         x = EqualizeLearningRate(Conv2D(self.n_fmap[0],
                                         kernel_size=self.kernel_size,
                                         padding=self.padding,
-                                        kernel_initializer=kernel_initializer),
+                                        kernel_initializer=self.kernel_initializer),
                                  name='base_conv')(x)
         x = PixelNormalization()(x)
         x = LeakyReLU()(x)
 
         # Remaining blocks
-        up = None
+        op = None
         for i in range(1, self.n_blocks):
-            up = UpSampling2D()(x)
-            x = self.gen_block(up, i)
+            if self.block_types[i] == 'resize':
+                op = UpSampling2D()(x)
+            else:
+                op = x
+            x = self.gen_block(op, i)
 
         # Final block output
         x = EqualizeLearningRate(Conv2D(self.channels,
                                         kernel_size=1,
                                         padding=self.padding,
-                                        kernel_initializer=kernel_initializer),
+                                        kernel_initializer=self.kernel_initializer),
                                  name='to_channels_{}'.format(self.n_blocks - 1))(x)
 
-        if fade_in and self.n_blocks > 1:
+        if self.n_blocks > 1:
             # Get latest block output
             x1 = x
 
@@ -93,8 +101,8 @@ class PGGAN:
             x2 = EqualizeLearningRate(Conv2D(self.channels,
                                              kernel_size=1,
                                              padding=self.padding,
-                                             kernel_initializer=kernel_initializer),
-                                      name='to_channels_{}'.format(self.n_blocks - 2))(up)
+                                             kernel_initializer=self.kernel_initializer),
+                                      name='to_channels_{}'.format(self.n_blocks - 2))(op)
 
             # Combine using weighted sum
             x1 = Multiply()([alpha, x1])
@@ -110,13 +118,13 @@ class PGGAN:
         x = EqualizeLearningRate(Conv2D(self.n_fmap[block],
                                         kernel_size=self.kernel_size,
                                         padding=self.padding,
-                                        kernel_initializer=kernel_initializer),
+                                        kernel_initializer=self.kernel_initializer),
                                  name='block{}_conv1'.format(block))(x)
         x = LeakyReLU()(x)
         x = EqualizeLearningRate(Conv2D(self.n_fmap[block - 1],
                                         kernel_size=self.kernel_size,
                                         padding=self.padding,
-                                        kernel_initializer=kernel_initializer),
+                                        kernel_initializer=self.kernel_initializer),
                                  name='block{}_conv2'.format(block))(x)
         x = LeakyReLU()(x)
 
@@ -128,22 +136,33 @@ class PGGAN:
         in_image = Input(shape=[self.final_res, self.final_res, self.channels], name='input_image')
         alpha = Input(shape=1, name='input_alpha')
 
+        image_norm = ImageNormalization()(in_image)
+
         if self.n_blocks > 1:
             # Get input for latest block
+            if self.block_types[self.n_blocks - 1] == 'denorm':
+                x1 = image_norm
+            else:
+                x1 = in_image
+
             x1 = EqualizeLearningRate(Conv2D(self.n_fmap[self.n_blocks - 1],
                                              kernel_size=1,
                                              padding=self.padding,
-                                             kernel_initializer=kernel_initializer),
-                                      name='from_channels_{}'.format(self.n_blocks - 1))(in_image)
+                                             kernel_initializer=self.kernel_initializer),
+                                      name='from_channels_{}'.format(self.n_blocks - 1))(x1)
             x1 = self.dis_block(x1, self.n_blocks - 1)
-            x1 = AveragePooling2D()(x1)
+
+            if self.block_types[self.n_blocks - 1] == 'resize':
+                x1 = AveragePooling2D()(x1)
+                x2 = AveragePooling2D()(image_norm)
+            else:
+                x2 = image_norm
 
             # Get input for previous block
-            x2 = AveragePooling2D()(in_image)
             x2 = EqualizeLearningRate(Conv2D(self.n_fmap[self.n_blocks - 2],
                                              kernel_size=1,
                                              padding=self.padding,
-                                             kernel_initializer=kernel_initializer),
+                                             kernel_initializer=self.kernel_initializer),
                                       name='from_channels_{}'.format(self.n_blocks - 2))(x2)
 
             # Combine using weighted sum
@@ -154,13 +173,14 @@ class PGGAN:
             # Remaining blocks
             for i in range(self.n_blocks - 2, 0, -1):
                 x = self.dis_block(x, i)
-                x = AveragePooling2D()(x)
+                if self.block_types[i] == 'resize':
+                    x = AveragePooling2D()(x)
 
         else:
             x = EqualizeLearningRate(Conv2D(self.n_fmap[self.n_blocks - 1],
                                             kernel_size=1,
                                             padding=self.padding,
-                                            kernel_initializer=kernel_initializer),
+                                            kernel_initializer=self.kernel_initializer),
                                      name='from_channels_{}'.format(self.n_blocks - 1))(in_image)
 
         # Output block
@@ -168,13 +188,13 @@ class PGGAN:
         x = EqualizeLearningRate(Conv2D(self.n_fmap[0],
                                         kernel_size=3,
                                         padding=self.padding,
-                                        kernel_initializer=kernel_initializer),
+                                        kernel_initializer=self.kernel_initializer),
                                  name='base_conv1')(x)
         x = LeakyReLU()(x)
         x = EqualizeLearningRate(Conv2D(self.n_fmap[0],
                                         kernel_size=4,
                                         padding='valid',
-                                        kernel_initializer=kernel_initializer),
+                                        kernel_initializer=self.kernel_initializer),
                                  name='base_conv2')(x)
         x = LeakyReLU()(x)
         x = Flatten()(x)
@@ -191,7 +211,7 @@ class PGGAN:
                           name='input_latent')
 
         x = EqualizeLearningRate(Dense(units=self.n_fmap[0] * self.init_res * self.init_res,
-                                       kernel_initializer=kernel_initializer),
+                                       kernel_initializer=self.kernel_initializer),
                                  name='base_dense')(in_latent)
         x = PixelNormalization()(x)
         x = LeakyReLU()(x)
@@ -199,7 +219,7 @@ class PGGAN:
         x = EqualizeLearningRate(Conv2D(self.n_fmap[0],
                                         kernel_size=self.kernel_size,
                                         padding=self.padding,
-                                        kernel_initializer=kernel_initializer),
+                                        kernel_initializer=self.kernel_initializer),
                                  name='base_conv')(x)
         x = PixelNormalization()(x)
         x = LeakyReLU()(x)
@@ -223,7 +243,7 @@ class PGGAN:
         x = EqualizeLearningRate(Conv2D(self.channels,
                                         kernel_size=1,
                                         padding=self.padding,
-                                        kernel_initializer=kernel_initializer),
+                                        kernel_initializer=self.kernel_initializer),
                                  name='to_channels_{}'.format(self.n_blocks - 1))(x)
 
         if split_idx > 0:
@@ -244,7 +264,7 @@ class PGGAN:
         x = EqualizeLearningRate(Conv2D(self.n_fmap[self.n_blocks - 1],
                                         kernel_size=1,
                                         padding=self.padding,
-                                        kernel_initializer=kernel_initializer),
+                                        kernel_initializer=self.kernel_initializer),
                                  name='from_channels_{}'.format(self.n_blocks - 1))(in_image)
 
         # Blocks
@@ -257,13 +277,13 @@ class PGGAN:
         x = EqualizeLearningRate(Conv2D(self.n_fmap[0],
                                         kernel_size=3,
                                         padding=self.padding,
-                                        kernel_initializer=kernel_initializer),
+                                        kernel_initializer=self.kernel_initializer),
                                  name='base_conv1')(x)
         x = LeakyReLU()(x)
         x = EqualizeLearningRate(Conv2D(self.n_fmap[0],
                                         kernel_size=4,
                                         padding='valid',
-                                        kernel_initializer=kernel_initializer),
+                                        kernel_initializer=self.kernel_initializer),
                                  name='base_conv2')(x)
         x = LeakyReLU()(x)
         x = Flatten()(x)
@@ -272,30 +292,3 @@ class PGGAN:
         model = Model(inputs=in_image, outputs=x, name='semantic_pred')
 
         return model
-
-
-class LatentMap:
-
-    def __init__(self,
-                 latent_size_in=100,
-                 latent_size_out=100,
-                 n_hidden_layers=4,
-                 n_units=256):
-
-        self.latent_size_in = latent_size_in
-        self.latent_size_out = latent_size_out
-        self.n_hidden_layers = n_hidden_layers
-        self.n_units = n_units
-
-    def build_model(self):
-
-        in_z = Input(shape=[self.latent_size_in])
-        x = in_z
-        for i in range(self.n_hidden_layers):
-            x = Dense(units=self.n_units, kernel_initializer=kernel_initializer)(x)
-            x = LeakyReLU()(x)
-
-        x = Dense(units=self.latent_size_out, kernel_initializer=kernel_initializer)(x)
-        x = LeakyReLU()(x)
-
-        return Model(inputs=in_z, outputs=x, name='latent_map')

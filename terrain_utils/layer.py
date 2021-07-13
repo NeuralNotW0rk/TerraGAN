@@ -124,6 +124,7 @@ class EqualizeLearningRate(Wrapper):
             fan_out = np.sqrt(np.prod(shape))
         return fan_in, fan_out
 
+
 class PixelNormalization(Layer):
 
     def __init__(self, **kwargs):
@@ -162,3 +163,20 @@ class MinibatchStdev(Layer):
         input_shape = list(input_shape)
         input_shape[-1] += 1
         return tuple(input_shape)
+
+
+class ImageNormalization(Layer):
+
+    def _init_(self, **kwargs):
+        super(ImageNormalization, self).__init__(**kwargs)
+
+    def call(self, inputs, **kwargs):
+        img_min = K.min(inputs, axis=[1, 2, 3], keepdims=True)
+        print(img_min)
+        img_max = K.max(inputs, axis=[1, 2, 3], keepdims=True)
+        print(img_max)
+        img_norm = (inputs - img_min) / (img_max - img_min)
+        return img_norm
+
+    def compute_output_shape(self, input_shape):
+        return input_shape

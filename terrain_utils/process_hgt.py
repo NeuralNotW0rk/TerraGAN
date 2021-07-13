@@ -53,7 +53,8 @@ def hgt_to_jpg(file, target, x, y, image=True):
         sample = np.rot90(sample, k=np.random.randint(0, 4), axes=[0, 1])
         s_min = np.amin(sample)
         s_max = np.amax(sample)
-        sample = (sample - s_min) / (s_max - s_min)
+        # sample = (sample - s_min) / (s_max - s_min)
+        sample = sample / max_elevation
         sample = np.expand_dims(sample, axis=-1)
         x.append(sample)
         y.append([s_min, s_max])
@@ -81,12 +82,12 @@ def process_all(root, target, x, y, image, depth=0):
 
 
 raw_dir = 'raw_data/vfp/'
-img_dir = 'data/vfp_256/'
-data_archive = 'data/vfp_256_labeled.npz'
+img_dir = 'data/vfp_256_pn/'
+data_archive = 'data/vfp_256_pn.npz'
 
 x = []
 y = []
-process_all(raw_dir, img_dir, x, y, False)
+process_all(raw_dir, img_dir, x, y, True)
 x = np.asarray(x)
 y = np.asarray(y)
 print(x.shape, y.shape)

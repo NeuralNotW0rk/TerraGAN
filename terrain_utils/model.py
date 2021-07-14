@@ -26,10 +26,10 @@ class PGGAN:
         else:
             self.block_types = block_types
         self.init_res = init_res
-        self.final_res = init_res * (2 ** (n_blocks - 1))
+        self.final_res = init_res * (2 ** block_types.count('resize'))
         self.interm_res = None
         self.kernel_size = kernel_size
-        self.kernel_initializer = kernel_initializer,
+        self.kernel_initializer = kernel_initializer
         self.padding = padding
         if isinstance(n_fmap, int):
             self.n_fmap = [n_fmap] * n_blocks

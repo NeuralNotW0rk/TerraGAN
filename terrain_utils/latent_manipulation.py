@@ -56,10 +56,4 @@ class LatentManipulator(Session):
         return latent + alpha * self.boundaries[semantic]
 
     def move_latent_conditional(self):
-
         pass
-
-
-if __name__ == '__main__':
-
-    lm = LatentManipulator('pgf1')

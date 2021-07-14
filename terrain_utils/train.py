@@ -52,14 +52,18 @@ class PGGANTrainer(Session):
         self.block = self.config['block']
         self.steps = self.config['steps']
         self.n_blocks = self.config['n_blocks']
+        self.block_types = self.config['block_types']
         self.block_batch_sizes = self.config['block_batch_sizes']
         self.block_steps = self.config['block_steps']
+        if isinstance(self.block_steps, int):
+            self.block_steps = [self.block_steps] * self.n_blocks
         self.data_path = self.config['data_path']
         self.sample_latents = np.asarray(self.config['sample_latents'])
 
         self.pgg = PGGAN(latent_size=self.config['latent_size'],
                          channels=self.config['channels'],
                          n_blocks=self.block + 1,
+                         block_types=self.block_types[:self.block + 1],
                          n_fmap=self.config['n_fmap'][:self.block + 1])
 
         self.gen = self.pgg.build_gen()
@@ -81,15 +85,8 @@ class PGGANTrainer(Session):
         self.gen_opt = Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8)
         self.dis_opt = Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8)
 
-        self.dataset, _ = load_real_samples(root_dir + self.data_path)
-        self.scaled_dataset = tf.image.resize(self.dataset, [self.pgg.final_res, self.pgg.final_res]).numpy()
-
-    def real_images(self, n_samples):
-
-        idx = np.random.randint(0, self.scaled_dataset.shape[0], n_samples)
-        images = self.scaled_dataset[idx]
-
-        return images
+        self.dataset = np.load(root_dir + self.data_path)
+        self.data_size = self.dataset['x'].shape[0]
 
     def get_alpha(self, n_samples):
 
@@ -97,6 +94,25 @@ class PGGANTrainer(Session):
         alpha_array = np.repeat(alpha, n_samples).reshape(n_samples, 1)
 
         return alpha_array
+
+    def real_images(self, n_samples):
+
+        idx = np.random.randint(0, self.data_size, n_samples)
+        block_type = self.block_types[self.block]
+        img = tf.constant(self.dataset['x'][idx])
+        img_min = K.min(img, axis=[1, 2, 3], keepdims=True)
+        img_max = K.max(img, axis=[1, 2, 3], keepdims=True)
+        img_norm = (img - img_min) / (img_max - img_min)
+
+        if block_type in ['resize', 'base']:
+            img_out = tf.image.resize(img_norm, [self.pgg.final_res, self.pgg.final_res])
+        elif block_type == 'denorm':
+            alpha = self.get_alpha(1)[0]
+            img_out = img * alpha + img_norm * (1.0 - alpha)
+        else:
+            img_out = img_norm
+
+        return img_out
 
     @tf.function
     def compute_WGAN_GP(self, images, latents, batch_size, alpha):

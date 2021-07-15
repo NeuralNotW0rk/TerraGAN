@@ -21,10 +21,12 @@ class PGGAN:
         self.latent_size = latent_size
         self.channels = channels
         self.n_blocks = n_blocks
+        print(block_types)
         if block_types is None:
-            self.block_types = ['resize'] * n_blocks
+            self.block_types = ['base'] + ['resize'] * (n_blocks - 1)
         else:
             self.block_types = block_types
+        assert self.block_types[0] == 'base', 'first block must be type "base"'
         self.init_res = init_res
         self.final_res = init_res * (2 ** block_types.count('resize'))
         self.interm_res = None
@@ -136,27 +138,23 @@ class PGGAN:
         in_image = Input(shape=[self.final_res, self.final_res, self.channels], name='input_image')
         alpha = Input(shape=1, name='input_alpha')
 
-        image_norm = ImageNormalization()(in_image)
-
         if self.n_blocks > 1:
             # Get input for latest block
-            if self.block_types[self.n_blocks - 1] == 'denorm':
-                x1 = image_norm
-            else:
-                x1 = in_image
-
             x1 = EqualizeLearningRate(Conv2D(self.n_fmap[self.n_blocks - 1],
                                              kernel_size=1,
                                              padding=self.padding,
                                              kernel_initializer=self.kernel_initializer),
-                                      name='from_channels_{}'.format(self.n_blocks - 1))(x1)
+                                      name='from_channels_{}'.format(self.n_blocks - 1))(in_image)
             x1 = self.dis_block(x1, self.n_blocks - 1)
 
             if self.block_types[self.n_blocks - 1] == 'resize':
                 x1 = AveragePooling2D()(x1)
-                x2 = AveragePooling2D()(image_norm)
+                x2 = AveragePooling2D()(in_image)
+            elif self.block_types[self.n_blocks - 1] == 'denorm':
+                x2 = in_image
+                # x2 = ImageNormalization()(in_image)
             else:
-                x2 = image_norm
+                x2 = in_image
 
             # Get input for previous block
             x2 = EqualizeLearningRate(Conv2D(self.n_fmap[self.n_blocks - 2],

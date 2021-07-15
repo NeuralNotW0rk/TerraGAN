@@ -3,6 +3,7 @@ from tensorflow.keras.optimizers import Adam
 from model import *
 from util import *
 
+
 LAMBDA = 10
 
 
@@ -57,6 +58,7 @@ class PGGANTrainer(Session):
         self.block_steps = self.config['block_steps']
         if isinstance(self.block_steps, int):
             self.block_steps = [self.block_steps] * self.n_blocks
+
         self.data_path = self.config['data_path']
         self.sample_latents = np.asarray(self.config['sample_latents'])
 
@@ -85,25 +87,24 @@ class PGGANTrainer(Session):
         self.gen_opt = Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8)
         self.dis_opt = Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8)
 
-        self.dataset = np.load(root_dir + self.data_path)
-        self.data_size = self.dataset['x'].shape[0]
+        self.dataset = np.load(root_dir + self.data_path)['x']
 
-    def get_alpha(self, n_samples):
+    def get_alpha(self, n_samples, cap=1.0):
 
-        alpha = min(2.0 * self.steps / self.block_steps[self.block], 1.0)
+        alpha = min(2.0 * self.steps / self.block_steps[self.block], cap)
         alpha_array = np.repeat(alpha, n_samples).reshape(n_samples, 1)
 
         return alpha_array
 
     def real_images(self, n_samples):
 
-        idx = np.random.randint(0, self.data_size, n_samples)
-        block_type = self.block_types[self.block]
-        img = tf.constant(self.dataset['x'][idx])
+        idx = np.random.randint(0, self.dataset.shape[0], n_samples)
+        img = tf.constant(self.dataset[idx])
         img_min = K.min(img, axis=[1, 2, 3], keepdims=True)
         img_max = K.max(img, axis=[1, 2, 3], keepdims=True)
         img_norm = (img - img_min) / (img_max - img_min)
 
+        block_type = self.block_types[self.block]
         if block_type in ['resize', 'base']:
             img_out = tf.image.resize(img_norm, [self.pgg.final_res, self.pgg.final_res])
         elif block_type == 'denorm':
@@ -112,6 +113,8 @@ class PGGANTrainer(Session):
         else:
             img_out = img_norm
 
+        img_out = img_out * 2.0 - 1.0
+        img_out = tf.cast(img_out, dtype=tf.float32)
         return img_out
 
     @tf.function
@@ -160,7 +163,7 @@ class PGGANTrainer(Session):
 
         images = self.real_images(batch_size)
         latents = random_latents(self.pgg.latent_size, batch_size)
-        alpha = self.get_alpha(batch_size)
+        alpha = self.get_alpha(batch_size, cap=0.8)
 
         d_loss, g_loss = self.compute_WGAN_GP(images, latents, batch_size, alpha)
 

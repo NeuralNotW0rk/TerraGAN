@@ -51,21 +51,15 @@ def hgt_to_jpg(file, target, x, y, image=True):
         pos = np.random.randint(0, d - sample_size, 2)
         sample = np.copy(hgt[pos[0]:pos[0] + sample_size, pos[1]:pos[1] + sample_size])
         sample = np.rot90(sample, k=np.random.randint(0, 4), axes=[0, 1])
+        sample = sample / max_elevation
         s_min = np.amin(sample)
         s_max = np.amax(sample)
-        # sample = (sample - s_min) / (s_max - s_min)
-        sample = sample / max_elevation
-        sample = np.expand_dims(sample, axis=-1)
-        x.append(sample)
-        y.append([s_min, s_max])
-
-        if image:
-            rgb = np.zeros(shape=[sample_size, sample_size, 3])
-            rgb[:, :, 0] = sample[:, :, 0]
-            rgb[:, :, 1] = sample[:, :, 0]
-            rgb[:, :, 2] = sample[:, :, 0]
-            plt.imsave(os.path.join(target, region + '_' + os.path.basename(file))[:-4] + '_' + str(s) + '.jpg', rgb,
-                       cmap='gray')
+        sample_norm = (sample - s_min) / (s_max - s_min)
+        sample_diff = sample - sample_norm
+        image = np.zeros(shape=[sample_size, sample_size, 2])
+        image[:, :, 0] = sample_norm * 2.0 - 1.0
+        image[:, :, 1] = sample_diff
+        x.append(image)
 
 
 def process_all(root, target, x, y, image, depth=0):
@@ -82,14 +76,17 @@ def process_all(root, target, x, y, image, depth=0):
 
 
 raw_dir = 'raw_data/vfp/'
-img_dir = 'data/vfp_256_pn/'
-data_archive = 'data/vfp_256_pn.npz'
+img_dir = 'data/vfp_256_2c/'
+data_archive = 'data/vfp_256_2c.npz'
 
 x = []
 y = []
-process_all(raw_dir, img_dir, x, y, True)
+process_all(raw_dir, img_dir, x, y, False)
 x = np.asarray(x)
 y = np.asarray(y)
 print(x.shape, y.shape)
+for i in range(x.shape[-1]):
+    ch = x[:, :, :, i]
+    print('Channel {}: [{}, {}]'.format(i, np.amin(ch), np.amax(ch)))
 
 np.savez_compressed(data_archive, x=x, y=y)

@@ -2,6 +2,7 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Dense, Flatten, Reshape, Conv2D, UpSampling2D, AveragePooling2D, LeakyReLU, Multiply, Add
 
 from layer import *
+from wrapper import *
 from util import *
 
 
@@ -16,6 +17,7 @@ class PGGAN:
                  kernel_size=3,
                  kernel_initializer='he_normal',
                  padding='same',
+                 output_activation='linear',
                  n_fmap=None):
 
         self.latent_size = latent_size
@@ -33,13 +35,14 @@ class PGGAN:
         self.kernel_size = kernel_size
         self.kernel_initializer = kernel_initializer
         self.padding = padding
+        self.output_activation = output_activation
         if isinstance(n_fmap, int):
             self.n_fmap = [n_fmap] * n_blocks
         else:
             assert len(n_fmap) == n_blocks, 'n_fmap must be int or list of ints size n_blocks'
             self.n_fmap = n_fmap
 
-    def gen_block(self, x, block):
+    def gen_resize_block(self, x, block):
 
         x = EqualizeLearningRate(Conv2D(self.n_fmap[block],
                                         kernel_size=self.kernel_size,
@@ -55,6 +58,20 @@ class PGGAN:
                                  name='block{}_conv2'.format(block))(x)
         x = PixelNormalization()(x)
         x = LeakyReLU()(x)
+
+        return x
+
+    def gen_denorm_block(self, x, block):
+
+        x = EqualizeLearningRate(Conv2D(self.n_fmap[block],
+                                        kernel_size=self.kernel_size,
+                                        padding=self.padding,
+                                        kernel_initializer=self.kernel_initializer),
+                                 name='block{}_conv1'.format(block))(x)
+        x = PixelNormalization()(x)
+        x = LeakyReLU()(x)
+        x = Flatten()(x)
+        x = EqualizeLearningRate(Dense(units=2), name='block{}_dense1'.format(block))(x)
 
         return x
 
@@ -81,37 +98,77 @@ class PGGAN:
 
         # Remaining blocks
         op = None
-        for i in range(1, self.n_blocks):
+        for i in range(1, self.n_blocks - 1):
             if self.block_types[i] == 'resize':
-                op = UpSampling2D()(x)
+                x = UpSampling2D()(x)
+                x = self.gen_resize_block(x, i)
             else:
-                op = x
-            x = self.gen_block(op, i)
+                print('Invalid block type at position {}: {}'.format(i, self.block_types[i]))
 
-        # Final block output
-        x = EqualizeLearningRate(Conv2D(self.channels,
-                                        kernel_size=1,
-                                        padding=self.padding,
-                                        kernel_initializer=self.kernel_initializer),
-                                 name='to_channels_{}'.format(self.n_blocks - 1))(x)
+        # ----Base block output----
+        if self.block_types[self.n_blocks - 1] == 'base':
 
-        if self.n_blocks > 1:
+            # Block output
+            x = EqualizeLearningRate(Conv2D(self.channels,
+                                            kernel_size=1,
+                                            padding=self.padding,
+                                            kernel_initializer=self.kernel_initializer,
+                                            activation=self.output_activation),
+                                     name='to_channels_{}'.format(self.n_blocks - 1))(x)
+
+            model = Model(inputs=[in_latent, alpha], outputs=x, name='gen')
+
+        # ----Resize block output----
+        elif self.block_types[self.n_blocks - 1] == 'resize':
+
+            # Final block
+            x = UpSampling2D()(x)
+            x1 = self.gen_resize_block(x, self.n_blocks - 1)
+
             # Get latest block output
-            x1 = x
+            x1 = EqualizeLearningRate(Conv2D(self.channels,
+                                             kernel_size=1,
+                                             padding=self.padding,
+                                             kernel_initializer=self.kernel_initializer,
+                                             activation=self.output_activation),
+                                      name='to_channels_{}'.format(self.n_blocks - 1))(x1)
 
             # Get previous block output
             x2 = EqualizeLearningRate(Conv2D(self.channels,
                                              kernel_size=1,
                                              padding=self.padding,
-                                             kernel_initializer=self.kernel_initializer),
-                                      name='to_channels_{}'.format(self.n_blocks - 2))(op)
+                                             kernel_initializer=self.kernel_initializer,
+                                             activation=self.output_activation),
+                                      name='to_channels_{}'.format(self.n_blocks - 2))(x)
 
             # Combine using weighted sum
             x1 = Multiply()([alpha, x1])
             x2 = Multiply()([1 - alpha, x2])
             x = Add()([x1, x2])
 
-        model = Model(inputs=[in_latent, alpha], outputs=x, name='gen')
+            model = Model(inputs=[in_latent, alpha], outputs=x, name='gen')
+
+        # ----Denorm layer output----
+        elif self.block_types[self.n_blocks - 1] == 'denorm':
+
+            # Final block
+            x1 = self.gen_denorm_block(x, self.n_blocks - 1)
+
+            # Get previous block output
+            x2 = EqualizeLearningRate(Conv2D(self.channels,
+                                             kernel_size=1,
+                                             padding=self.padding,
+                                             kernel_initializer=self.kernel_initializer,
+                                             activation=self.output_activation),
+                                      name='to_channels_{}'.format(self.n_blocks - 2))(x)
+
+            # Denormalize previous block output
+            x1 = ImageDenormalization()([x2, x1])
+
+            # Combine using weighted sum
+            x1 = Multiply()([alpha, x1])
+            x2 = Multiply()([1 - alpha, x2])
+            x = Add()([x1, x2])
 
         return model
 
@@ -137,6 +194,7 @@ class PGGAN:
         # Input
         in_image = Input(shape=[self.final_res, self.final_res, self.channels], name='input_image')
         alpha = Input(shape=1, name='input_alpha')
+        x = in_image
 
         if self.n_blocks > 1:
             # Get input for latest block
@@ -144,17 +202,17 @@ class PGGAN:
                                              kernel_size=1,
                                              padding=self.padding,
                                              kernel_initializer=self.kernel_initializer),
-                                      name='from_channels_{}'.format(self.n_blocks - 1))(in_image)
+                                      name='from_channels_{}'.format(self.n_blocks - 1))(x)
+            x1 = LeakyReLU()(x1)
             x1 = self.dis_block(x1, self.n_blocks - 1)
 
             if self.block_types[self.n_blocks - 1] == 'resize':
                 x1 = AveragePooling2D()(x1)
-                x2 = AveragePooling2D()(in_image)
+                x2 = AveragePooling2D()(x)
             elif self.block_types[self.n_blocks - 1] == 'denorm':
-                x2 = in_image
-                # x2 = ImageNormalization()(in_image)
+                x2 = ImageNormalization()(x)
             else:
-                x2 = in_image
+                x2 = x
 
             # Get input for previous block
             x2 = EqualizeLearningRate(Conv2D(self.n_fmap[self.n_blocks - 2],
@@ -162,6 +220,7 @@ class PGGAN:
                                              padding=self.padding,
                                              kernel_initializer=self.kernel_initializer),
                                       name='from_channels_{}'.format(self.n_blocks - 2))(x2)
+            x2 = LeakyReLU()(x2)
 
             # Combine using weighted sum
             x1 = Multiply()([alpha, x1])
@@ -179,7 +238,8 @@ class PGGAN:
                                             kernel_size=1,
                                             padding=self.padding,
                                             kernel_initializer=self.kernel_initializer),
-                                     name='from_channels_{}'.format(self.n_blocks - 1))(in_image)
+                                     name='from_channels_{}'.format(self.n_blocks - 1))(x)
+            x = LeakyReLU()(x)
 
         # Output block
         x = MinibatchStdev()(x)

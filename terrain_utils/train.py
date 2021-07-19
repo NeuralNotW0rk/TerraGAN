@@ -3,17 +3,7 @@ from tensorflow.keras.optimizers import Adam
 from model import *
 from util import *
 
-
 LAMBDA = 10
-
-
-def load_real_samples(filename):
-
-    data = np.load(filename)
-    x = (data['x'] - 0.5) * 2.0
-    y = data['y']
-
-    return x, y
 
 
 class PGGANTrainer(Session):
@@ -87,7 +77,12 @@ class PGGANTrainer(Session):
         self.gen_opt = Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8)
         self.dis_opt = Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8)
 
-        self.dataset = np.load(root_dir + self.data_path)['x']
+        images = np.load(root_dir + self.data_path)['x']
+        ch0 = images[:, :, :, 0]
+        ch1 = images[:, :, :, 1]
+        print('Channel 0: [{}, {}]'.format(np.amin(ch0), np.amax(ch0)))
+        print('Channel 1: [{}, {}]'.format(np.amin(ch1), np.amax(ch1)))
+        self.dataset = tf.image.resize(images, [self.pgg.final_res, self.pgg.final_res]).numpy()
 
     def get_alpha(self, n_samples, cap=1.0):
 
@@ -99,23 +94,9 @@ class PGGANTrainer(Session):
     def real_images(self, n_samples):
 
         idx = np.random.randint(0, self.dataset.shape[0], n_samples)
-        img = tf.constant(self.dataset[idx])
-        img_min = K.min(img, axis=[1, 2, 3], keepdims=True)
-        img_max = K.max(img, axis=[1, 2, 3], keepdims=True)
-        img_norm = (img - img_min) / (img_max - img_min)
+        images = self.dataset[idx]
 
-        block_type = self.block_types[self.block]
-        if block_type in ['resize', 'base']:
-            img_out = tf.image.resize(img_norm, [self.pgg.final_res, self.pgg.final_res])
-        elif block_type == 'denorm':
-            alpha = self.get_alpha(1)[0]
-            img_out = img * alpha + img_norm * (1.0 - alpha)
-        else:
-            img_out = img_norm
-
-        img_out = img_out * 2.0 - 1.0
-        img_out = tf.cast(img_out, dtype=tf.float32)
-        return img_out
+        return images
 
     @tf.function
     def compute_WGAN_GP(self, images, latents, batch_size, alpha):
@@ -163,7 +144,7 @@ class PGGANTrainer(Session):
 
         images = self.real_images(batch_size)
         latents = random_latents(self.pgg.latent_size, batch_size)
-        alpha = self.get_alpha(batch_size, cap=0.8)
+        alpha = self.get_alpha(batch_size)
 
         d_loss, g_loss = self.compute_WGAN_GP(images, latents, batch_size, alpha)
 
@@ -212,69 +193,16 @@ class PGGANTrainer(Session):
 
     def evaluate(self, model):
         imgs = model.predict([self.sample_latents, self.get_alpha(64)])
-        imgs = (imgs + 1.0) / 2.0
-        r = []
 
+        r = []
         for i in range(0, 64, 8):
             r.append(np.concatenate(imgs[i:i + 8], axis=1))
+        grid = np.concatenate(r, axis=0)
 
-        c1 = np.concatenate(r, axis=0)
-        c1 = np.clip(c1, 0.0, 1.0)
+        norm = (grid[:, :, 0:1] + 1) / 2
+        diff = grid[:, :, 1:2]
+        real = norm + diff
 
-        save_image(c1, 'gen', self.block, self.steps, self.session_id)
+        save_image(np.clip(norm, 0.0, 1.0), 'norm', self.block, self.steps, self.session_id)
+        save_image(np.clip(real, 0.0, 1.0), 'real', self.block, self.steps, self.session_id)
         print('--Images saved')
-
-
-class SemanticPredictorTrainer(Session):
-
-    def __init__(self,
-                 session_id,
-                 semantics=None):
-
-        super(SemanticPredictorTrainer, self).__init__(session_id)
-
-        try:
-            self.config['sp_epochs']
-        except KeyError:
-            self.config.update({'sp_epochs': 0,
-                                'semantics': semantics})
-
-        self.sp_epochs = self.config['sp_epochs']
-        self.semantics = self.config['semantics']
-        self.data_path = self.config['data_path']
-
-        self.pgg = PGGAN(latent_size=self.config['latent_size'],
-                         channels=self.config['channels'],
-                         n_blocks=self.config['n_blocks'],
-                         n_fmap=self.config['n_fmap'])
-
-        self.sp = self.pgg.build_semantic_predictor(self.semantics)
-        if self.sp_epochs == 0:
-            load_weights(self.sp, 'dis', '{}_{}'.format(self.config['block'], self.config['steps']), self.session_id)
-        else:
-            load_weights(self.sp, 'sp', str(self.sp_epochs), self.session_id)
-        self.sp.compile(optimizer='adam', loss='mse')
-
-        self.x, self.y = load_real_samples(root_dir + self.data_path)
-
-    def train_epochs(self, epochs):
-
-        self.sp.fit(self.x, self.y, batch_size=16, epochs=epochs, validation_split=0.2, verbose=2)
-
-        self.sp_epochs += epochs
-        save_weights(self.sp, 'sp', str(self.sp_epochs), self.session_id)
-
-    def generate_latent_scores(self, n_latents=10000, batch_size=16):
-
-        gen = self.pgg.build_gen_stable()
-        load_weights(gen, 'gen', '{}_{}'.format(self.config['block'], self.config['steps']), self.session_id)
-
-        latents = random_latents(self.pgg.latent_size, n_latents)
-        print('Generating images from latents...')
-        imgs = gen.predict(latents, batch_size=batch_size, verbose=1)
-        print('Scoring images...')
-        scores = self.sp.predict(imgs, batch_size=batch_size, verbose=1)
-
-        data_archive = root_dir + 'data/' + self.session_id + '_scores_' + '_'.join(self.semantics) + '.npz'
-        np.savez_compressed(data_archive, latents=latents, scores=scores)
-        print('--Scores saved')

@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 # standard hgt is 1201x1201 where each pixel is 3 arc-seconds (90 m)
 
 dim = 1024
-max_elevation = 10000
+max_elevation = 8000
 
 sample_size = 256
 samples_per_img = 64
@@ -55,10 +55,9 @@ def hgt_to_jpg(file, target, x, y, image=True):
         s_min = np.amin(sample)
         s_max = np.amax(sample)
         sample_norm = (sample - s_min) / (s_max - s_min)
-        sample_diff = sample - sample_norm
         image = np.zeros(shape=[sample_size, sample_size, 2])
         image[:, :, 0] = sample_norm * 2.0 - 1.0
-        image[:, :, 1] = sample_diff
+        image[:, :, 1] = sample * 2.0 - 1.0
         x.append(image)
 
 

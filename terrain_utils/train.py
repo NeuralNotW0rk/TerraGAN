@@ -3,6 +3,7 @@ from tensorflow.keras.optimizers import Adam
 from model import *
 from util import *
 
+
 LAMBDA = 10
 
 
@@ -181,6 +182,7 @@ class PGGANTrainer(Session):
             print('Final block training complete')
 
     def save(self):
+
         version = '{}_{}'.format(self.block, self.steps)
         save_weights(self.gen, 'gen', version, self.session_id)
         save_weights(self.dis, 'dis', version, self.session_id)
@@ -192,6 +194,7 @@ class PGGANTrainer(Session):
         print('--Weights saved')
 
     def evaluate(self, model):
+
         imgs = model.predict([self.sample_latents, self.get_alpha(64)])
 
         r = []

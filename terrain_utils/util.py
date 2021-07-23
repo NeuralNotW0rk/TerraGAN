@@ -1,9 +1,8 @@
-from PIL import Image
-
 import os
 import json
 
-from layer import *
+import numpy as np
+import tensorflow as tf
 
 root_dir = ''
 
@@ -38,6 +37,17 @@ def save_image(data, name, block, num, session):
         os.mkdir(path)
     x = tf.keras.preprocessing.image.array_to_img(data)
     x.save(path + name + '_' + str(block) + '_' + str(num) + '.png')
+
+
+def combine_channels(images):
+    # Batch of images
+    if len(images.shape) == 4:
+        norms = (images[:, :, :, 0] + 1) / 2
+        diffs = images[:, :, :, 1]
+    else:
+        norms = (images[:, :, 0:1] + 1) / 2
+        diffs = images[:, :, 1:2]
+    return norms + diffs
 
 
 class Config(dict):

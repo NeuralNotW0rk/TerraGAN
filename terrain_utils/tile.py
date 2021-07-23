@@ -21,6 +21,7 @@ class TerrainGenerator(Session):
         self.pgg = PGGAN(latent_size=self.config['latent_size'],
                          channels=self.config['channels'],
                          n_blocks=self.config['n_blocks'],
+                         block_types=self.config['block_types'],
                          n_fmap=self.config['n_fmap'])
 
         self.gen_a, self.gen_b = self.pgg.build_gen_stable(segment_idx)
@@ -41,10 +42,10 @@ class TerrainGenerator(Session):
 
         print('Initialization complete')
 
-    def random_latent_field(self, field_res, cropping=0, overlap=0):
+    def random_latent_field(self, field_res, cropping=0, overlap=0, lm_version=None):
         print('Generating random latent field...')
 
-        lm = LatentManipulator(self.session_id)
+        lm = LatentManipulator(self.session_id, lm_version)
 
         output_tile_res = self.tile_res - (2 * cropping)
         self.tiles_per_row = int((field_res - overlap) / (output_tile_res - overlap))
@@ -59,15 +60,15 @@ class TerrainGenerator(Session):
         for i in range(output_tile_res):
             for j in range(output_tile_res):
                 pixel = np.asarray([i, j])
-                weight_mask[i, j, :] = (max_weight - np.linalg.norm(center - pixel)) ** 4 + 1
+                weight_mask[i, j, :] = (max_weight - np.linalg.norm(center - pixel)) ** 1 + 1e-8
 
         for i in range(self.tiles_per_row):
-            alpha = (i / (self.tiles_per_row - 1) * 2 - 1) * 0.75
+            alpha = (i / (self.tiles_per_row - 1) * 2 - 1) * -0.5
             for j in range(self.tiles_per_row):
 
                 # Inputs
                 latent = random_latents(self.pgg.latent_size, 1)
-                latent = lm.move_latent(latent, 'max', alpha)
+                # latent = lm.move_latent(latent, 'mean', alpha)
 
                 # Generate intermediate latent tiles
                 tile = self.gen_a.predict(latent)[0]
@@ -153,15 +154,17 @@ class TerrainGenerator(Session):
 
 if __name__ == '__main__':
 
-    tg = TerrainGenerator('pgf1', segment_idx=2)
+    tg = TerrainGenerator('pgf5', segment_idx=2)
 
-    tg.random_latent_field(field_res=64, overlap=4)
+    tg.random_latent_field(field_res=64, overlap=4, lm_version='ms1')
 
     out = tg.process_latent_field(stride=4, blend=True)
 
-    out = np.clip((out + 1.0) / 2.0, 0.0, 1.0)
+    out = combine_channels(out)
+
+    out = np.clip(out, 0.0, 1.0)
 
     print(np.amin(out), np.amax(out))
 
-    util.save_image(out, 'pgf1_max', 6, 2, 'tiling_test')
+    util.save_image(out, 'pgf5_mean', 6, 2, 'tiling_test')
 

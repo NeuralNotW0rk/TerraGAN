@@ -42,13 +42,15 @@ class TerrainGenerator(Session):
 
         print('Initialization complete')
 
-    def random_latent_field(self, field_res, cropping=0, overlap=0, lm_version=None):
+    def random_latent_field(self, field_res, cropping=0, overlap=0, lm_version=None, lm_attribute=None,  alpha=1.0):
         print('Generating random latent field...')
 
         lm = LatentManipulator(self.session_id, lm_version)
 
         output_tile_res = self.tile_res - (2 * cropping)
-        self.tiles_per_row = int((field_res - overlap) / (output_tile_res - overlap))
+        stride = output_tile_res - overlap
+
+        self.tiles_per_row = int((field_res - output_tile_res + stride) / stride)
 
         self.latent_field = np.zeros(shape=[field_res, field_res, self.gen_a.output[-1].shape[-1]])
         overlap_map = self.latent_field.copy()
@@ -60,18 +62,29 @@ class TerrainGenerator(Session):
         for i in range(output_tile_res):
             for j in range(output_tile_res):
                 pixel = np.asarray([i, j])
-                weight_mask[i, j, :] = (max_weight - np.linalg.norm(center - pixel)) ** 1 + 1e-8
+                weight_mask[i, j, :] = (max_weight - np.linalg.norm(center - pixel)) ** 1 + 1
+
+        latents = np.random.normal(0, 1, size=[self.tiles_per_row, self.tiles_per_row, self.pgg.latent_size])
+        latents_perlin = np.zeros(shape=[field_res, field_res, self.pgg.latent_size])
+        for i in range(self.pgg.latent_size):
+            latents_perlin[:, :, i] = gn.generate_perlin_noise_2d(shape=[field_res, field_res], res=[4, 4])
+        latents_perlin = latents_perlin[:self.tiles_per_row, :self.tiles_per_row]
+        #plt.imshow(latents_perlin[:, :, 0])
+        #plt.show()
+        latents = alpha * latents + (1 - alpha) * latents_perlin
 
         for i in range(self.tiles_per_row):
-            alpha = (i / (self.tiles_per_row - 1) * 2 - 1) * -0.5
+            delta = (i / (self.tiles_per_row - 1) * 2 - 1) * -2.0
             for j in range(self.tiles_per_row):
 
                 # Inputs
-                latent = random_latents(self.pgg.latent_size, 1)
-                # latent = lm.move_latent(latent, 'mean', alpha)
+                # latent = random_latents(self.pgg.latent_size, 1)
+                latent = latents[i, j]
+                latent = lm.center_latent(latent, lm_attribute)
+                latent = lm.move_latent(latent, lm_attribute, delta)
 
                 # Generate intermediate latent tiles
-                tile = self.gen_a.predict(latent)[0]
+                tile = self.gen_a.predict(np.asarray([latent]))[0]
 
                 if cropping > 0:
                     tile = tile[cropping:-cropping, cropping:-cropping]
@@ -84,17 +97,16 @@ class TerrainGenerator(Session):
                 self.latent_field[ia:ia + output_tile_res, ja:ja + output_tile_res] += tile
                 overlap_map[ia:ia + output_tile_res, ja:ja + output_tile_res] += weight_mask
 
+        overlap_map += 1e-8
         self.latent_field /= overlap_map
 
-    def add_gradient_noise(self, factor=1, field_res=64):
+    def add_gradient_noise(self, factor=1.0, field_res=64):
 
         if self.latent_field is None:
             self.latent_field = np.zeros(shape=[field_res, field_res, self.gen_a.output[-1].shape[-1]])
 
         for i in range(self.latent_field.shape[-1]):
             self.latent_field[:, :, i] += gn.generate_fractal_noise_2d(shape=self.latent_field.shape[:-1], res=[4, 4], octaves=4, persistence=1) * factor
-            # plt.imshow(self.latent_field[:, :, i])
-            # plt.show()
 
     def process_latent_field(self, stride, blend=True):
 
@@ -122,8 +134,9 @@ class TerrainGenerator(Session):
         output = np.zeros(shape=output_shape)
 
         # Move gen_b across latent field
-        steps = int((self.latent_field.shape[0] - 1) / stride)
+        steps = int((self.latent_field.shape[0] - self.tile_res + stride) / stride)
         for i in range(steps):
+            delta = (i / (steps - 1) * 2 - 1) * -0.9
             for j in range(steps):
 
                 # Get tile from latent_field
@@ -134,6 +147,8 @@ class TerrainGenerator(Session):
 
                 # Generate image from tile
                 tile_b = self.gen_b.predict(np.asarray([tile_a]))[0]
+                #tile_b -= np.amax(tile_b[:, :, 1])
+                #tile_b += delta
 
                 # Add pixels on top of final output
                 ib = int(ia * self.b_scaling)
@@ -156,15 +171,23 @@ if __name__ == '__main__':
 
     tg = TerrainGenerator('pgf5', segment_idx=2)
 
-    tg.random_latent_field(field_res=64, overlap=4, lm_version='ms1')
+    tg.random_latent_field(field_res=64,
+                           overlap=4,
+                           cropping=0,
+                           lm_version='ms1',
+                           lm_attribute='mean',
+                           alpha=1)
+
+    tg.add_gradient_noise(factor=1)
 
     out = tg.process_latent_field(stride=4, blend=True)
 
-    out = combine_channels(out)
+    out[:, :, 1] = combine_channels(out)[:, :, 0]
 
     out = np.clip(out, 0.0, 1.0)
 
     print(np.amin(out), np.amax(out))
 
-    util.save_image(out, 'pgf5_mean', 6, 2, 'tiling_test')
+    util.save_image(out[:, :, 0:1], 'pgf5_mean_center_0', 6, 1, 'tiling_test')
+    util.save_image(out[:, :, 1:2], 'pgf5_mean_center_1', 6, 1, 'tiling_test')
 

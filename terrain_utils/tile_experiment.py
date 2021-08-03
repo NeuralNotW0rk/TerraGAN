@@ -64,17 +64,21 @@ class TerrainGenerator(Session):
                 pixel = np.asarray([i, j])
                 weight_mask[i, j, :] = (max_weight - np.linalg.norm(center - pixel)) ** 1 + 1
 
-        latents = np.random.normal(0, 1, size=[self.tiles_per_row, self.tiles_per_row, self.pgg.latent_size])
-        latents_perlin = np.zeros(shape=[field_res, field_res, self.pgg.latent_size])
-        for i in range(self.pgg.latent_size):
-            latents_perlin[:, :, i] = gn.generate_perlin_noise_2d(shape=[field_res, field_res], res=[4, 4])
-        latents_perlin = latents_perlin[:self.tiles_per_row, :self.tiles_per_row]
+        latents = np.asarray(self.config['sample_latents'])
+        print(latents.shape)
+        latents = np.reshape(latents, newshape=[8, 8, 128])
+        print(latents.shape)
+        #latents = np.random.normal(0, 1, size=[self.tiles_per_row, self.tiles_per_row, self.pgg.latent_size])
+        #latents_perlin = np.zeros(shape=[field_res, field_res, self.pgg.latent_size])
+        #for i in range(self.pgg.latent_size):
+        #    latents_perlin[:, :, i] = gn.generate_perlin_noise_2d(shape=[field_res, field_res], res=[4, 4])
+        #latents_perlin = latents_perlin[:self.tiles_per_row, :self.tiles_per_row]
         #plt.imshow(latents_perlin[:, :, 0])
         #plt.show()
-        latents = alpha * latents + (1 - alpha) * latents_perlin
+        #latents = alpha * latents + (1 - alpha) * latents_perlin
 
         for i in range(self.tiles_per_row):
-            delta = (i / (self.tiles_per_row - 1) * 2 - 1) * -2.0
+            delta = (i / (self.tiles_per_row - 1) * 2 - 1) * -4.0
             for j in range(self.tiles_per_row):
 
                 # Inputs
@@ -136,7 +140,7 @@ class TerrainGenerator(Session):
         # Move gen_b across latent field
         steps = int((self.latent_field.shape[0] - self.tile_res + stride) / stride)
         for i in range(steps):
-            delta = (i / (steps - 1) * 2 - 1) * -0.9
+            delta = (i / (steps - 1) * 2 - 1) * -0.1
             for j in range(steps):
 
                 # Get tile from latent_field
@@ -147,7 +151,7 @@ class TerrainGenerator(Session):
 
                 # Generate image from tile
                 tile_b = self.gen_b.predict(np.asarray([tile_a]))[0]
-                #tile_b -= np.amax(tile_b[:, :, 1])
+                #tile_b -= np.mean(tile_b[:, :, 1])
                 #tile_b += delta
 
                 # Add pixels on top of final output
@@ -169,25 +173,28 @@ class TerrainGenerator(Session):
 
 if __name__ == '__main__':
 
-    tg = TerrainGenerator('pgf5', segment_idx=2)
+    tg = TerrainGenerator('pgf6', segment_idx=2)
 
-    tg.random_latent_field(field_res=64,
+    tg.random_latent_field(field_res=32,
                            overlap=4,
                            cropping=0,
-                           lm_version='ms1',
-                           lm_attribute='mean',
+                           lm_version='msm10',
+                           lm_attribute='mean_5',
                            alpha=1)
 
-    tg.add_gradient_noise(factor=1)
+    #tg.add_gradient_noise(factor=1)
 
     out = tg.process_latent_field(stride=4, blend=True)
 
-    out[:, :, 1] = combine_channels(out)[:, :, 0]
+    #out[:, :, 1] = combine_channels(out)[:, :, 0]
+    #out[:, :, 0] = (out[:, :, 0] + 1.0) / 2.0
+
+    out = (out + 1.0) / 2.0
 
     out = np.clip(out, 0.0, 1.0)
 
     print(np.amin(out), np.amax(out))
 
-    util.save_image(out[:, :, 0:1], 'pgf5_mean_center_0', 6, 1, 'tiling_test')
-    util.save_image(out[:, :, 1:2], 'pgf5_mean_center_1', 6, 1, 'tiling_test')
+    util.save_image(out[:, :, 0:1], 'sample2_rand_alt_blend_0', 6, 1, 'tiling_test')
+    util.save_image(out[:, :, 1:2], 'sample2_rand_alt_blend_1', 6, 1, 'tiling_test')
 

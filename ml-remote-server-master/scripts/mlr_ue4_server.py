@@ -3,26 +3,24 @@ import \
     unreal_engine as ue  # for remote logging only, this is a proxy import to enable same functionality as local variants
 from mlpluginapi import MLPluginAPI
 
-from latent_manipulation import *
+from tile_generator import *
 
 
 class TerraGANAPI(MLPluginAPI):
 
     def on_setup(self):
-        lm = LatentManipulator('pgf6', )
-        pass
+        self.tg = TileGenerator('pgf6', 2, overlap=2)
 
     def on_json_input(self, json_input):
 
         ue.log(json_input)
 
-        feed_dict = {self.a: json_input['a'], self.b: json_input['b']}
+        latents = np.asarray(json_input["latents"])
+        tile_ids = json_input['tile_ids']
 
-        raw_result = self.sess.run(self.c, feed_dict)
+        tile_out = self.tg.generate_tile(latents, tile_ids)
 
-        ue.log('raw result: ' + str(raw_result))
-
-        return {'c': raw_result.tolist()}
+        return {'tile': tile_out.tolist()}
 
     def on_begin_training(self):
         pass

@@ -25,8 +25,6 @@ def load_weights(model, name, version, session):
     model.load_weights(path + '{}_{}.h5'.format(name, version),
                        by_name=True)
 
-    return model
-
 
 def save_image(data, name, block, num, session):
     path = root_dir + 'results/' + session + '/'

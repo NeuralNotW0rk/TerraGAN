@@ -1,7 +1,7 @@
 from model import *
 from util import *
 
-
+import matplotlib.pyplot as plt
 class TileGenerator(Session):
 
     def __init__(self, session_id, segment_idx, overlap=2, steps=None):
@@ -29,21 +29,36 @@ class TileGenerator(Session):
         load_weights(self.gen_b, 'gen', version, self.session_id)
 
         self.res_a = self.gen_a.outputs[0].shape[1]
+        self.res_b = self.gen_b.outputs[0].shape[1]
+        self.scale_b = self.res_b / self.res_a
         self.latent_tile_map = {}
 
-        self.weight_mask = np.zeros(shape=(self.res_a, self.res_a, 1))
-        r = (self.weight_mask.shape[0] - 1.0) / 2.0
+        self.weight_mask_a = np.zeros(shape=(self.res_a, self.res_a, 1))
+        r = (self.res_a - 1.0) / 2.0
+        max_weight = np.linalg.norm(np.asarray([r, r]))
         for i in range(self.res_a):
             x = i - r
             for j in range(self.res_a):
                 y = j - r
-                d = max(abs(x), abs(y))
-                self.weight_mask[i, j, 0] = r - d
+                weight = np.linalg.norm(np.asarray([x, y]))
+                self.weight_mask_a[i, j, 0] = max_weight - weight + 1
+
+        self.weight_mask_b = np.zeros(shape=(self.res_b, self.res_b, 1))
+        r = (self.res_b - 1.0) / 2.0
+        max_weight = np.linalg.norm(np.asarray([r, r]))
+        for i in range(self.res_b):
+            x = i - r
+            for j in range(self.res_b):
+                y = j - r
+                weight = np.linalg.norm(np.asarray([x, y]))
+                self.weight_mask_b[i, j, 0] = (max_weight - weight) ** 4 + 1
 
     def generate_tile(self, latents, tile_ids):
 
-        latent_field_chunk = np.zeros(shape=self.gen_a.outputs[0].shape[1:])
-        weight_map = np.zeros(shape=(self.res_a, self.res_a, 1))
+        chunk_size_a = self.res_a * 3 - self.overlap * 2
+
+        chunk_a = np.zeros(shape=(chunk_size_a, chunk_size_a, self.gen_a.outputs[0].shape[-1]))
+        weight_map_a = np.zeros(shape=(chunk_size_a, chunk_size_a, 1))
 
         tiles = []
 
@@ -60,62 +75,46 @@ class TileGenerator(Session):
 
             tiles.append(tile)
 
-        ov = self.overlap
+        for i in range(3):
+            y = (self.res_a - self.overlap) * i
+            for j in range(3):
+                x = (self.res_a - self.overlap) * j
+                if tiles[i * 3 + j] is not None:
+                    chunk_a[x:x + self.res_a, y:y + self.res_a] += tiles[i * 3 + j] * self.weight_mask_a
+                    weight_map_a[x:x + self.res_a, y:y + self.res_a] += self.weight_mask_a
 
-        # Blend latent tiles
-        if self.overlap > 0:
+        chunk_a /= weight_map_a + 1e-8
 
-            # Top left
-            if tiles[0] is not None:
-                latent_field_chunk[:ov, -ov:] += tiles[0][-ov:, :ov] * self.weight_mask[-ov:, :ov]
-                weight_map[:ov, -ov:] += self.weight_mask[-ov:, :ov]
+        chunk_size_b = int(chunk_size_a * self.scale_b)
 
-            # Top middle
-            if tiles[1] is not None:
-                latent_field_chunk[:, -ov:] += tiles[1][:, :ov] * self.weight_mask[:, :ov]
-                weight_map[:, -ov:] += self.weight_mask[:, :ov]
+        chunk_b = np.zeros(shape=(chunk_size_b, chunk_size_b, self.gen_b.outputs[0].shape[-1]))
+        weight_map_b = np.zeros(shape=(chunk_size_b, chunk_size_b, 1))
 
-            # Top right
-            if tiles[2] is not None:
-                latent_field_chunk[-ov:, -ov:] += tiles[2][:ov, :ov] * self.weight_mask[:ov, :ov]
-                weight_map[-ov:, -ov:] += self.weight_mask[:ov, :ov]
+        for i in range(3):
+            ya = (self.res_a - self.overlap) * i
+            yb = int(ya * self.scale_b)
+            for j in range(3):
+                xa = (self.res_a - self.overlap) * j
+                xb = int(xa * self.scale_b)
 
-            # Left
-            if tiles[3] is not None:
-                latent_field_chunk[:ov, :] += tiles[3][-ov:, :] * self.weight_mask[-ov:, :]
-                weight_map[:ov, :] += self.weight_mask[-ov:, :]
+                tile_b = self.gen_b.predict(np.asarray([chunk_a[xa:xa + self.res_a, ya:ya + self.res_a]]))[0]
+                tile_b = (tile_b + 1.0) / 2.0
+                chunk_b[xb:xb + self.res_b, yb:yb + self.res_b] += tile_b * self.weight_mask_b
+                weight_map_b[xb:xb + self.res_b, yb:yb + self.res_b] += self.weight_mask_b
 
-            # Middle
-            if tiles[4] is not None:
-                latent_field_chunk[:, :] += tiles[4][:, :] * self.weight_mask[:, :]
-                weight_map[:, :] += self.weight_mask[:, :]
+        chunk_b /= weight_map_b + 1e-8
 
-            # Right
-            if tiles[5] is not None:
-                latent_field_chunk[-ov:, :] += tiles[5][:ov, :] * self.weight_mask[:ov, :]
-                weight_map[-ov:, :] += self.weight_mask[:ov, :]
-
-            # Bottom left
-            if tiles[6] is not None:
-                latent_field_chunk[:ov, :ov] += tiles[6][-ov:, -ov:] * self.weight_mask[-ov:, -ov:]
-                weight_map[:ov, :ov] += self.weight_mask[-ov:, -ov:]
-
-            # Bottom middle
-            if tiles[7] is not None:
-                latent_field_chunk[:, :ov] += tiles[7][:, -ov:] * self.weight_mask[:, -ov:]
-                weight_map[:, :ov] += self.weight_mask[:, -ov:]
-
-            # Bottom right
-            if tiles[8] is not None:
-                latent_field_chunk[-ov:, :ov] += tiles[8][:ov, -ov:] * self.weight_mask[:ov, -ov:]
-                weight_map[-ov:, :ov] += self.weight_mask[:ov, -ov:]
-
-            latent_field_chunk /= weight_map + 1e-8
-
-        # If no overlap, just use middle tile
-        else:
-            latent_field_chunk = tiles[4]
-
-        tile_out = self.gen_b.predict(np.asarray([latent_field_chunk]))[0]
+        tile_start = int((self.res_a - self.overlap) * self.scale_b)
+        tile_out = chunk_b[tile_start:tile_start + self.res_b, tile_start:tile_start + self.res_b]
 
         return tile_out
+
+
+if __name__ == '__main__':
+    latents = random_latents(128, 9)
+    tile_ids = ['0', '1', 'empty', '3', '4', '5', '6', '7', '8']
+
+    tg = TileGenerator('pgf6', 2, 4)
+    tile = tg.generate_tile(latents, tile_ids)
+    plt.imshow(tile[:, :, 1])
+    plt.show()

@@ -175,14 +175,16 @@ if __name__ == '__main__':
 
     tg = TerrainGenerator('pgf6', segment_idx=2)
 
+    overlap = 4
+
     tg.random_latent_field(field_res=32,
-                           overlap=4,
+                           overlap=overlap,
                            cropping=0,
                            lm_version='msm10',
                            lm_attribute='mean_5',
                            alpha=1)
 
-    #tg.add_gradient_noise(factor=1)
+    #tg.add_gradient_noise(factor=2)
 
     out = tg.process_latent_field(stride=4, blend=True)
 
@@ -195,6 +197,6 @@ if __name__ == '__main__':
 
     print(np.amin(out), np.amax(out))
 
-    util.save_image(out[:, :, 0:1], 'sample2_rand_alt_blend_0', 6, 1, 'tiling_test')
-    util.save_image(out[:, :, 1:2], 'sample2_rand_alt_blend_1', 6, 1, 'tiling_test')
+    util.save_image(out[:, :, 0:1], 'sample2_o2_0', 6, 1, 'tiling_test')
+    util.save_image(out[:, :, 1:2], 'sample2_o2_1', 6, 1, 'tiling_test')
 

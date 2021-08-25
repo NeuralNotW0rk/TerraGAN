@@ -1,7 +1,8 @@
+import matplotlib.pyplot as plt
+
 from model import *
 from util import *
 
-import matplotlib.pyplot as plt
 class TileGenerator(Session):
 
     def __init__(self, session_id, segment_idx, overlap=2, steps=None):
@@ -65,8 +66,8 @@ class TileGenerator(Session):
         # Lookup intermediate tiles and generate if missing
         for i in range(9):
             tile = None
-            tile_id = tile_ids[i]
-            if tile_id != 'empty':
+            tile_id = str(tile_ids[i])
+            if tile_id != '-1':
                 try:
                     tile = self.latent_tile_map[tile_id]
                 except KeyError:
@@ -109,12 +110,13 @@ class TileGenerator(Session):
 
         return tile_out
 
-
+'''
 if __name__ == '__main__':
     latents = random_latents(128, 9)
-    tile_ids = ['0', '1', 'empty', '3', '4', '5', '6', '7', '8']
+    tile_ids = [0, 1, -1, 3, 4, 5, 6, 7, 8]
 
     tg = TileGenerator('pgf6', 2, 4)
     tile = tg.generate_tile(latents, tile_ids)
     plt.imshow(tile[:, :, 1])
     plt.show()
+'''

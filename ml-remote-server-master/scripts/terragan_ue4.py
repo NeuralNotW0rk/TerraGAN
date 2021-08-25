@@ -10,17 +10,19 @@ class TerraGANAPI(MLPluginAPI):
 
     def on_setup(self):
         self.tg = TileGenerator('pgf6', 2, overlap=2)
+        ue.log('TileGenerator loaded')
 
     def on_json_input(self, json_input):
 
-        ue.log(json_input)
-
-        latents = np.asarray(json_input["latents"])
-        tile_ids = json_input['tile_ids']
+        ue.log('Received inputs')
+        latents = np.asarray(json_input['latents']).reshape((9, self.tg.pgg.latent_size))
+        tile_ids = np.asarray(json_input['tile_ids'])
 
         tile_out = self.tg.generate_tile(latents, tile_ids)
+        tile_out = tile_out[:, :, 1].flatten()
+        ue.log('Tile generated')
 
-        return {'tile': tile_out.tolist()}
+        return {'tile_out': list(tile_out)}
 
     def on_begin_training(self):
         pass

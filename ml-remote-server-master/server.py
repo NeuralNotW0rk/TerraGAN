@@ -45,6 +45,8 @@ sio.attach(app)
 #linkup references for script callbacks via ue.log and ue.custom_event
 ue.set_sio_link(sio, app)
 
+
+
 inputFieldName = 'inputData'
 functionFieldName = 'targetFunction'
 
@@ -62,7 +64,7 @@ async def disconnect(sid):
 #main methods
 @sio.on('sendInput', namespace="/")
 async def send_input(sid, data):
-	print('sendInput: ' + str(data))
+	#print('sendInput: ' + str(data))
 
 	global inputFieldName
 	global functionFieldName
@@ -71,8 +73,8 @@ async def send_input(sid, data):
 	future = ue.sio_future()
 	def callback_lambda(params):
 		#print and emit logs
-		print('sendInput return: ' + str(params))
-		ue.log(params)
+		#print('sendInput return: ' + str(params))
+		#ue.log(params)
 		future.set_result(params)
 
 	#branch targeting for expected functions

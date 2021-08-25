@@ -4,7 +4,7 @@ import json
 import numpy as np
 import tensorflow as tf
 
-root_dir = ''
+root_dir = '../terrain_utils/'
 
 
 def random_latents(latent_size, n):

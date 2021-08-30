@@ -27,6 +27,8 @@ def load_weights(model, name, version, session):
 
 
 def save_image(data, name, block, num, session):
+    if len(data.shape) == 2:
+        data = np.expand_dims(data, axis=-1)
     path = root_dir + 'results/' + session + '/'
     if not os.path.exists(path):
         os.mkdir(path)

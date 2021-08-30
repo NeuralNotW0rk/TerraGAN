@@ -9,16 +9,24 @@ from tile_generator import *
 class TerraGANAPI(MLPluginAPI):
 
     def on_setup(self):
-        self.tg = TileGenerator('pgf6', 2, overlap=2)
+        self.tg = TileGenerator('pgf6', 2, overlap=4)
         ue.log('TileGenerator loaded')
 
     def on_json_input(self, json_input):
 
-        ue.log('Received inputs')
-        latents = np.asarray(json_input['latents']).reshape((9, self.tg.pgg.latent_size))
+        ue.log('Generating tile '
+               + str(json_input['faces'][4]) + ' '
+               + str(json_input['x'][4]) + ' '
+               + str(json_input['y'][4]))
         tile_ids = np.asarray(json_input['tile_ids'])
+        rotations = np.asarray(json_input['rotations'])
+        latents = np.asarray(json_input['latents']).reshape((9, self.tg.pgg.latent_size))
 
-        tile_out = self.tg.generate_tile(latents, tile_ids)
+        tile_out = self.tg.generate_tile(latents, tile_ids, rotations,
+                                         str(json_input['faces'][4]) + ' '
+                                         + str(json_input['x'][4]) + ' '
+                                         + str(json_input['y'][4]))
+
         tile_out = tile_out[:, :, 1].flatten()
         ue.log('Tile generated')
 

@@ -1,4 +1,5 @@
 import tensorflow as tf
+import numpy as np
 import \
     unreal_engine as ue  # for remote logging only, this is a proxy import to enable same functionality as local variants
 from mlpluginapi import MLPluginAPI
@@ -27,7 +28,8 @@ class TerraGANAPI(MLPluginAPI):
                                          + str(json_input['x'][4]) + ' '
                                          + str(json_input['y'][4]))
 
-        tile_out = tile_out[:, :, 1].flatten()
+        tile_out = tile_out[:, :, 0].flatten()
+        ue.log(str(np.amin(tile_out)) + ' ' + str(np.amax(tile_out)))
         ue.log('Tile generated')
 
         return {'tile_out': list(tile_out)}

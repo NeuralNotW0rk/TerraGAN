@@ -86,7 +86,7 @@ class TileGenerator(Session):
                     latents[i] = self.lm.move_latent(latents[i], 'mean_5', -1.0)
                     tile = self.gen_a.predict(np.asarray([latents[i]]))[0]
                     self.latent_tile_map[tile_id] = tile
-                tiles.append(np.rot90(tile, k=rotations[i], axes=(0, 1)))
+                tiles.append(np.rot90(tile, rotations[i], axes=(0, 1)))
             else:
                 tiles.append(None)
 
@@ -114,7 +114,8 @@ class TileGenerator(Session):
                 xa = (self.res_a - self.overlap) * j
                 xb = int(xa * self.scale_b)
 
-                tile_b = self.gen_b.predict(np.asarray([chunk_a[ya:ya + self.res_a, xa:xa + self.res_a]]))[0]
+                tile_b = self.gen_b.predict(np.asarray([np.rot90(chunk_a[ya:ya + self.res_a, xa:xa + self.res_a], -rotations[i * 3 + j], (0, 1))]))[0]
+                tile_b = np.rot90(tile_b, rotations[i * 3 + j], (0, 1))
                 tile_b = (tile_b + 1.0) / 2.0
 
                 chunk_b[yb:yb + self.res_b, xb:xb + self.res_b] += tile_b * self.weight_mask_b
@@ -136,15 +137,24 @@ class TileGenerator(Session):
 
 # Some stuff left over from debugging
 if __name__ == '__main__':
-    latents = random_latents(128, 12)
-    tile_ids = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-    rotations = np.zeros(12)
+    latents_top = random_latents(128, 9)
+    tile_ids_top = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+    rotations_top = [0, 0, 1, 0, 0, 1, 0, 0, 1]
+    latents_right = random_latents(128, 9)
+    tile_ids_right = [9, 10, 11, 2, 5, 8, 1, 4, 7]
+    rotations_right = [0, 0, 0, 0, 0, 0, 3, 3, 3]
     tg = TileGenerator('pgf6', 2, 4)
 
-    tile_s = tg.generate_tile(latents[:9], tile_ids[:9], rotations[:9], 'a')
-    plt.imshow(tile_s[:, :, 1])
+    tile_top = tg.generate_tile(latents_top, tile_ids_top, rotations_top, 'a')
+    plt.imshow(tile_top[:, :, 1])
     plt.show()
 
-    tile_s = tg.generate_tile(latents[-9:], tile_ids[-9:], rotations[-9:], 'b')
-    plt.imshow(tile_s[:, :, 1])
+    tile_right = tg.generate_tile(latents_right, tile_ids_right, rotations_right, 'b')
+    plt.imshow(tile_right[:, :, 1])
+    plt.show()
+
+    tile_a = np.zeros(shape=[tile_top.shape[0] * 2, tile_top.shape[1], tile_top.shape[2]])
+    tile_a[:tile_top.shape[0]] = np.rot90(tile_top, 3, axes=(0, 1))
+    tile_a[tile_top.shape[0]:] = tile_right
+    plt.imshow(tile_a[:, :, 1])
     plt.show()
